@@ -1,32 +1,17 @@
 import type { FakeHost } from '~/testing/fakeHost'
-import { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { createApp } from '~/app'
-import {
-  createFakeHost,
-  createFakeHostRoot,
-  createFakeTransport,
-} from '~/testing/fakeHost'
+import { createFakeHost, createTestApp } from '~/testing/fakeHost'
 
 const delegatedThreadId = 'thread:delegated-task:command%3Amcp%3Aabc'
 
 let hive: FakeHost
 let crefil: FakeHost
-let app: ReturnType<typeof createApp>
+let testApp: ReturnType<typeof createTestApp>
 
 beforeEach(async () => {
-  const root = createFakeHostRoot()
-  hive = createFakeHost(root, 'hive')
-  crefil = createFakeHost(root, 'crefil')
-  app = createApp({
-    database: new Database(':memory:', { strict: true }),
-    hosts: [
-      { label: 'hive', destination: 'adwin@hive' },
-      { label: 'crefil', destination: 'a.ying@crefil' },
-    ],
-    transport: createFakeTransport(root),
-    clock: () => new Date('2026-11-14T00:00:00Z'),
-  })
+  testApp = createTestApp({ hosts: ['hive', 'crefil'] })
+  hive = createFakeHost(testApp.root, 'hive')
+  crefil = createFakeHost(testApp.root, 'crefil')
 
   hive.addThread({
     id: 'thread-1',
@@ -58,13 +43,10 @@ beforeEach(async () => {
   await sync()
 })
 
-const sync = () =>
-  app.handle(new Request('http://localhost/sync', { method: 'POST' }))
+const sync = () => testApp.sync()
 
 const get = (query: Record<string, string>) =>
-  app.handle(
-    new Request(`http://localhost/search?${new URLSearchParams(query)}`),
-  )
+  testApp.handle(`/search?${new URLSearchParams(query)}`)
 
 const search = async (query: Record<string, string>) => {
   const response = await get(query)

@@ -1,9 +1,11 @@
+import type { AppCollaborators } from '~/app'
 import type { HostTransport, QueryOperation } from '~/hosts'
 import { Database } from 'bun:sqlite'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createApp } from '~/app'
 
 const queryScript = fileURLToPath(
   new URL('../../host/query.mjs', import.meta.url),
@@ -214,6 +216,44 @@ export const runQueryScript = async (
     child.exited,
   ])
   return { stdout, stderr, exitCode }
+}
+
+export const testNow = new Date('2026-11-14T00:00:00Z')
+
+type TestAppOptions = Partial<Omit<AppCollaborators, 'hosts'>> & {
+  /** Host labels. Give each a fixture with `createFakeHost(root, label)`. */
+  hosts?: string[]
+}
+
+/**
+ * An app wired to fake Hosts under a fresh root, with an in-memory archive and
+ * a fixed clock. A Host without a fixture fails like an offline one.
+ */
+export const createTestApp = ({
+  hosts = ['hive'],
+  ...collaborators
+}: TestAppOptions = {}) => {
+  const root = createFakeHostRoot()
+  const queries: { label: string; operation: QueryOperation }[] = []
+  const app = createApp({
+    database: new Database(':memory:', { strict: true }),
+    transport: createFakeTransport(root, (label, operation) =>
+      queries.push({ label, operation }),
+    ),
+    clock: () => testNow,
+    ...collaborators,
+    hosts: hosts.map((label) => ({ label, destination: `adwin@${label}` })),
+  })
+  const handle = (path: string, init?: RequestInit) =>
+    app.handle(new Request(`http://localhost${path}`, init))
+
+  return {
+    app,
+    root,
+    queries,
+    handle,
+    sync: () => handle('/sync', { method: 'POST' }),
+  }
 }
 
 /** A HostTransport that runs the query script against each fake Host. */

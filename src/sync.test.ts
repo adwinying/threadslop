@@ -1,37 +1,17 @@
-import type { QueryOperation } from '~/hosts'
 import type { FakeHost } from '~/testing/fakeHost'
-import { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { createApp } from '~/app'
-import {
-  createFakeHost,
-  createFakeHostRoot,
-  createFakeTransport,
-} from '~/testing/fakeHost'
+import { createFakeHost, createTestApp } from '~/testing/fakeHost'
 
 type Hit = { host: string; threadId: string; snippet: string }
 
 let hive: FakeHost
 let crefil: FakeHost
-let queries: { label: string; operation: QueryOperation }[]
-let app: ReturnType<typeof createApp>
+let testApp: ReturnType<typeof createTestApp>
 
 beforeEach(() => {
-  const root = createFakeHostRoot()
-  hive = createFakeHost(root, 'hive')
-  crefil = createFakeHost(root, 'crefil')
-  queries = []
-  app = createApp({
-    database: new Database(':memory:', { strict: true }),
-    hosts: [
-      { label: 'hive', destination: 'adwin@hive' },
-      { label: 'crefil', destination: 'a.ying@crefil' },
-    ],
-    transport: createFakeTransport(root, (label, operation) =>
-      queries.push({ label, operation }),
-    ),
-    clock: () => new Date('2026-11-14T00:00:00Z'),
-  })
+  testApp = createTestApp({ hosts: ['hive', 'crefil'] })
+  hive = createFakeHost(testApp.root, 'hive')
+  crefil = createFakeHost(testApp.root, 'crefil')
 
   hive.addThread({
     id: 'thread-1',
@@ -69,20 +49,17 @@ beforeEach(() => {
   })
 })
 
-const sync = () =>
-  app.handle(new Request('http://localhost/sync', { method: 'POST' }))
+const sync = () => testApp.sync()
 
 const search = async (q: string) => {
-  const response = await app.handle(
-    new Request(`http://localhost/search?q=${encodeURIComponent(q)}`),
-  )
+  const response = await testApp.handle(`/search?q=${encodeURIComponent(q)}`)
   expect(response.status).toBe(200)
   const { hits } = (await response.json()) as { hits: Hit[] }
   return hits
 }
 
 const threadFetches = () =>
-  queries.filter(({ operation }) => operation === 'threads')
+  testApp.queries.filter(({ operation }) => operation === 'threads')
 
 describe('POST /sync', () => {
   test('a first Sync archives every Message so /search finds them', async () => {
@@ -113,7 +90,7 @@ describe('POST /sync', () => {
 describe('POST /sync again', () => {
   test('fetches no Threads when nothing changed', async () => {
     await sync()
-    queries = []
+    testApp.queries.length = 0
 
     const response = await sync()
 
@@ -130,7 +107,7 @@ describe('POST /sync again', () => {
 describe('POST /sync after a Host changes', () => {
   test('re-pulls an edited Thread so search reflects the edit', async () => {
     await sync()
-    queries = []
+    testApp.queries.length = 0
     hive.editMessage({
       id: 'item-2',
       threadId: 'thread-1',
@@ -151,7 +128,7 @@ describe('POST /sync after a Host changes', () => {
 
   test('re-pulls a fork that adds Items with old timestamps', async () => {
     await sync()
-    queries = []
+    testApp.queries.length = 0
     hive.addMessage({
       id: 'item-forked',
       threadId: 'thread-1',

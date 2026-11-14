@@ -1,27 +1,15 @@
 import type { FakeHost } from '~/testing/fakeHost'
-import { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { createApp } from '~/app'
-import {
-  createFakeHost,
-  createFakeHostRoot,
-  createFakeTransport,
-} from '~/testing/fakeHost'
+import { createFakeHost, createTestApp } from '~/testing/fakeHost'
 
 type Hit = { host: string; threadId: string; snippet: string }
 
 let hive: FakeHost
-let app: ReturnType<typeof createApp>
+let testApp: ReturnType<typeof createTestApp>
 
 beforeEach(() => {
-  const root = createFakeHostRoot()
-  hive = createFakeHost(root, 'hive')
-  app = createApp({
-    database: new Database(':memory:', { strict: true }),
-    hosts: [{ label: 'hive', destination: 'adwin@hive' }],
-    transport: createFakeTransport(root),
-    clock: () => new Date('2026-11-14T00:00:00Z'),
-  })
+  testApp = createTestApp()
+  hive = createFakeHost(testApp.root, 'hive')
 
   hive.addThread({
     id: 'thread-1',
@@ -48,10 +36,9 @@ beforeEach(() => {
   })
 })
 
-const get = (path: string) => app.handle(new Request(`http://localhost${path}`))
+const get = (path: string) => testApp.handle(path)
 
-const sync = () =>
-  app.handle(new Request('http://localhost/sync', { method: 'POST' }))
+const sync = () => testApp.sync()
 
 const search = async (q: string, items?: 'messages' | 'all') => {
   const params = new URLSearchParams({ q, ...(items && { items }) })

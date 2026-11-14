@@ -1,18 +1,10 @@
-import type { QueryOperation } from '~/hosts'
 import type { FakeHost } from '~/testing/fakeHost'
 import { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { createApp } from '~/app'
-import {
-  createFakeHost,
-  createFakeHostRoot,
-  createFakeTransport,
-} from '~/testing/fakeHost'
-
-const now = new Date('2026-11-14T00:00:00Z')
+import { join } from 'node:path'
+import { createFakeHost, createTestApp, testNow } from '~/testing/fakeHost'
 
 const rowCounts = (db: Database) =>
   db
@@ -26,33 +18,14 @@ const rowCounts = (db: Database) =>
         ?.n,
     ])
 
-let hive: FakeHost
-let queries: { label: string; operation: QueryOperation }[]
-let app: ReturnType<typeof createApp>
-
-beforeEach(() => {
-  const root = createFakeHostRoot()
-  hive = createFakeHost(root, 'hive')
-  queries = []
-  // mayonaca has no fixture, so its query script fails like an offline Host.
-  app = createApp({
-    database: new Database(':memory:', { strict: true }),
-    hosts: [
-      { label: 'mayonaca', destination: 'adwin@mayonaca' },
-      { label: 'hive', destination: 'adwin@hive' },
-    ],
-    transport: createFakeTransport(root, (label, operation) =>
-      queries.push({ label, operation }),
-    ),
-    clock: () => now,
-  })
-
-  hive.addThread({
+const createHive = (root: string) => {
+  const host = createFakeHost(root, 'hive')
+  host.addThread({
     id: 'thread-1',
     title: 'Fix login',
     updatedAt: '2026-11-01T00:00:00.000Z',
   })
-  hive.addMessage({
+  host.addMessage({
     id: 'item-1',
     threadId: 'thread-1',
     ordinal: 1,
@@ -60,12 +33,21 @@ beforeEach(() => {
     text: 'Why does the login redirect loop?',
     updatedAt: '2026-11-01T00:00:01.000Z',
   })
+  return host
+}
+
+let hive: FakeHost
+let testApp: ReturnType<typeof createTestApp>
+
+beforeEach(() => {
+  // mayonaca has no fixture, so its query script fails like an offline Host.
+  testApp = createTestApp({ hosts: ['mayonaca', 'hive'] })
+  hive = createHive(testApp.root)
 })
 
-const handle = (path: string, init?: RequestInit) =>
-  app.handle(new Request(`http://localhost${path}`, init))
+const handle = (path: string) => testApp.handle(path)
 
-const sync = () => handle('/sync', { method: 'POST' })
+const sync = () => testApp.sync()
 
 describe('POST /sync with a failing Host', () => {
   test('syncs the other Hosts and /health shows the failure', async () => {
@@ -91,12 +73,12 @@ describe('POST /sync with a failing Host', () => {
           environmentId: null,
           lastSuccessAt: null,
           lastError: expect.stringContaining('no such file'),
-          lastErrorAt: now.toISOString(),
+          lastErrorAt: testNow.toISOString(),
         },
         {
           host: 'hive',
           environmentId: hive.environmentId,
-          lastSuccessAt: now.toISOString(),
+          lastSuccessAt: testNow.toISOString(),
           lastError: null,
           lastErrorAt: null,
         },
@@ -110,7 +92,7 @@ describe('two concurrent POST /sync calls', () => {
     const [first, second] = await Promise.all([sync(), sync()])
 
     expect(
-      queries.filter(({ operation }) => operation === 'signatures'),
+      testApp.queries.filter(({ operation }) => operation === 'signatures'),
     ).toEqual([
       { label: 'mayonaca', operation: 'signatures' },
       { label: 'hive', operation: 'signatures' },
@@ -121,25 +103,25 @@ describe('two concurrent POST /sync calls', () => {
 
 describe('the Sync cron job', () => {
   test('runs every 5 minutes', () => {
-    expect(app.store.cron.sync.getPattern()).toBe('*/5 * * * *')
+    expect(testApp.app.store.cron.sync.getPattern()).toBe('*/5 * * * *')
   })
 
   test('joins a Sync already started by POST /sync', async () => {
     const [response] = await Promise.all([
       sync(),
-      app.store.cron.sync.trigger(),
+      testApp.app.store.cron.sync.trigger(),
     ])
 
     expect(response.status).toBe(200)
     expect(
-      queries.filter(({ operation }) => operation === 'signatures'),
+      testApp.queries.filter(({ operation }) => operation === 'signatures'),
     ).toHaveLength(2)
   })
 })
 
 describe('the Snapshot cron job', () => {
   test('runs daily at 05:45 Asia/Tokyo', () => {
-    const { snapshot } = app.store.cron
+    const { snapshot } = testApp.app.store.cron
 
     expect(snapshot.getPattern()).toBe('45 5 * * *')
     expect(snapshot.options.timezone).toBe('Asia/Tokyo')
@@ -151,15 +133,11 @@ describe('the Snapshot cron job', () => {
       create: true,
       strict: true,
     })
-    app = createApp({
-      database,
-      hosts: [{ label: 'hive', destination: 'adwin@hive' }],
-      transport: createFakeTransport(dirname(hive.home)),
-      clock: () => now,
-    })
+    testApp = createTestApp({ database })
+    createHive(testApp.root)
     await sync()
 
-    await app.store.cron.snapshot.trigger()
+    await testApp.app.store.cron.snapshot.trigger()
 
     const backup = new Database(join(dataDir, 'threadslop.backup.sqlite'), {
       readonly: true,
