@@ -225,6 +225,7 @@ describe('GET /threads/:host/:threadId', () => {
         id: threadId,
         title: 'Investigate auth',
         projectTitle: 'threadslop',
+        archived: false,
         archivedAt: null,
       }),
       items: [
@@ -257,6 +258,22 @@ describe('GET /threads/:host/:threadId', () => {
       expect.objectContaining({
         role: null,
         text: 'cat auth.log\ntoken expired at 12:00',
+      }),
+    )
+  })
+
+  test('flags a Thread archived on its Host', async () => {
+    hive.archiveThread(threadId, '2026-11-03T00:00:00.000Z')
+    await sync()
+
+    const response = await getThread('hive', threadId)
+
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        thread: expect.objectContaining({
+          archived: true,
+          archivedAt: '2026-11-03T00:00:00.000Z',
+        }),
       }),
     )
   })

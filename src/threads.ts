@@ -49,7 +49,7 @@ export const createThreadReader = (db: Database) => {
     const thread = threadQuery.get({ host, threadId })
     return (
       thread && {
-        thread,
+        thread: { ...thread, archived: thread.archivedAt !== null },
         items: itemsQuery
           .all({ host, threadId, all: scope === 'all' })
           .map((item) => ({ ...item, role: roleOf(item.type) })),
