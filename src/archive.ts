@@ -165,6 +165,28 @@ export const createArchive = (db: Database) => {
        deleted = excluded.deleted`,
   )
 
+  const deleteStaleItemsQuery = db.query(
+    `DELETE FROM items
+     WHERE host = $host AND thread_id = $threadId
+       AND item_id NOT IN (SELECT value FROM json_each($itemIds))`,
+  )
+  const deleteThreadQuery = db.query(
+    'DELETE FROM threads WHERE host = $host AND thread_id = $threadId',
+  )
+
+  const saveSignature = (
+    host: string,
+    threadId: string,
+    signature: Signature,
+  ) => {
+    upsertSignatureQuery.run({
+      host,
+      threadId,
+      ...signature,
+      deleted: signature.deleted ? 1 : 0,
+    })
+  }
+
   return {
     recordHost: (host: string, environmentId: string) => {
       upsertHostQuery.run({ host, environmentId })
@@ -181,21 +203,37 @@ export const createArchive = (db: Database) => {
           ]),
       ),
 
-    /** Upserts Threads, their Items and their new Signatures atomically. */
+    /**
+     * Upserts Threads, their Items and their new Signatures atomically, and
+     * drops Items the Host no longer reports.
+     */
     saveThreads: db.transaction((host: string, threads: ArchivedThread[]) => {
       for (const { items, signature, ...thread } of threads) {
         upsertThreadQuery.run({ host, ...thread })
+        deleteStaleItemsQuery.run({
+          host,
+          threadId: thread.id,
+          itemIds: JSON.stringify(items.map(({ id }) => id)),
+        })
         for (const item of items) {
           upsertItemQuery.run({ host, threadId: thread.id, ...item })
         }
-        upsertSignatureQuery.run({
-          host,
-          threadId: thread.id,
-          ...signature,
-          deleted: signature.deleted ? 1 : 0,
-        })
+        saveSignature(host, thread.id, signature)
       }
     }),
+
+    /**
+     * Removes deleted Threads with their Items, keeping their Signatures so
+     * they aren't re-pulled.
+     */
+    removeThreads: db.transaction(
+      (host: string, deleted: Map<string, Signature>) => {
+        for (const [threadId, signature] of deleted) {
+          deleteThreadQuery.run({ host, threadId })
+          saveSignature(host, threadId, signature)
+        }
+      },
+    ),
   }
 }
 

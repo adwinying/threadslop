@@ -110,7 +110,17 @@ export const syncHost = async (
     (signature) => !isUnchanged(stored.get(signature.id), signature),
   )
 
-  for (const batch of batchByItemCount(changed)) {
+  archive.removeThreads(
+    host.label,
+    new Map(
+      changed
+        .filter(({ deleted }) => deleted)
+        .map(({ id, ...signature }) => [id, signature]),
+    ),
+  )
+
+  const live = changed.filter(({ deleted }) => !deleted)
+  for (const batch of batchByItemCount(live)) {
     const signatures = new Map(batch.map(({ id, ...rest }) => [id, rest]))
     const { threads } = threadsSchema.parse(
       JSON.parse(
@@ -130,7 +140,7 @@ export const syncHost = async (
     )
   }
 
-  return { host: host.label, ok: true, threadsPulled: changed.length }
+  return { host: host.label, ok: true, threadsPulled: live.length }
 }
 
 export const syncAll = async (

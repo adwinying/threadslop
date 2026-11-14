@@ -111,6 +111,34 @@ export const createFakeHost = (root: string, label: string) => {
         payload: messagePayload(message),
       })
     },
+    removeItem: (id: string) => {
+      db.query(
+        'DELETE FROM orchestration_v2_projection_turn_items WHERE turn_item_id = $id',
+      ).run({ id })
+    },
+    archiveThread: (id: string, archivedAt: string) => {
+      db.query(
+        `UPDATE orchestration_v2_projection_threads
+         SET archived_at = $archivedAt, updated_at = $archivedAt
+         WHERE thread_id = $id`,
+      ).run({ id, archivedAt })
+    },
+    deleteThread: (id: string, deletedAt: string) => {
+      db.query(
+        `UPDATE orchestration_v2_projection_threads
+         SET deleted_at = $deletedAt, updated_at = $deletedAt
+         WHERE thread_id = $id`,
+      ).run({ id, deletedAt })
+    },
+    /** Drops a Thread outright, as a reinstall that resets T3's DB would. */
+    purgeThread: (id: string) => {
+      db.query(
+        'DELETE FROM orchestration_v2_projection_turn_items WHERE thread_id = $id',
+      ).run({ id })
+      db.query(
+        'DELETE FROM orchestration_v2_projection_threads WHERE thread_id = $id',
+      ).run({ id })
+    },
   }
 }
 
