@@ -143,14 +143,23 @@ export const syncHost = async (
   return { host: host.label, ok: true, threadsPulled: live.length }
 }
 
+/** Syncs every Host in turn. A failing Host is recorded and skipped. */
 export const syncAll = async (
   archive: Archive,
   transport: HostTransport,
   hosts: Host[],
+  clock: () => Date,
 ) => {
   const results = []
   for (const host of hosts) {
-    results.push(await syncHost(archive, transport, host))
+    try {
+      results.push(await syncHost(archive, transport, host))
+      archive.recordSuccess(host.label, clock())
+    } catch (cause) {
+      const error = cause instanceof Error ? cause.message : String(cause)
+      archive.recordFailure(host.label, error, clock())
+      results.push({ host: host.label, ok: false, error })
+    }
   }
   return { hosts: results }
 }

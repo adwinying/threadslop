@@ -117,6 +117,32 @@ export const createArchive = (db: Database) => {
     `INSERT INTO hosts (label, environment_id) VALUES ($host, $environmentId)
      ON CONFLICT (label) DO UPDATE SET environment_id = excluded.environment_id`,
   )
+  const recordSuccessQuery = db.query(
+    `INSERT INTO hosts (label, last_success_at) VALUES ($host, $at)
+     ON CONFLICT (label) DO UPDATE SET last_success_at = excluded.last_success_at`,
+  )
+  const recordFailureQuery = db.query(
+    `INSERT INTO hosts (label, last_error, last_error_at)
+     VALUES ($host, $error, $at)
+     ON CONFLICT (label) DO UPDATE SET
+       last_error = excluded.last_error,
+       last_error_at = excluded.last_error_at`,
+  )
+  const hostsQuery = db.query<
+    {
+      host: string
+      environmentId: string | null
+      lastSuccessAt: string | null
+      lastError: string | null
+      lastErrorAt: string | null
+    },
+    []
+  >(
+    `SELECT label AS host, environment_id AS environmentId,
+            last_success_at AS lastSuccessAt, last_error AS lastError,
+            last_error_at AS lastErrorAt
+     FROM hosts`,
+  )
   const signaturesQuery = db.query<
     { threadId: string; updatedAt: string; itemCount: number; deleted: number },
     { host: string }
@@ -190,6 +216,29 @@ export const createArchive = (db: Database) => {
   return {
     recordHost: (host: string, environmentId: string) => {
       upsertHostQuery.run({ host, environmentId })
+    },
+
+    recordSuccess: (host: string, at: Date) => {
+      recordSuccessQuery.run({ host, at: at.toISOString() })
+    },
+
+    recordFailure: (host: string, error: string, at: Date) => {
+      recordFailureQuery.run({ host, error, at: at.toISOString() })
+    },
+
+    /** Each Host's Sync status, in the order of `hosts`. */
+    health: (hosts: string[]) => {
+      const rows = new Map(hostsQuery.all().map((row) => [row.host, row]))
+      return hosts.map(
+        (host) =>
+          rows.get(host) ?? {
+            host,
+            environmentId: null,
+            lastSuccessAt: null,
+            lastError: null,
+            lastErrorAt: null,
+          },
+      )
     },
 
     /** The Signatures each Host last reported, by Thread ID. */
