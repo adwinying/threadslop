@@ -66,6 +66,11 @@ export const createSshTransport =
         'BatchMode=yes',
         '-o',
         'ConnectTimeout=10',
+        // Fail within ~45s if a Host goes to sleep mid-Sync, so it can't block the others.
+        '-o',
+        'ServerAliveInterval=15',
+        '-o',
+        'ServerAliveCountMax=3',
         '-o',
         'StrictHostKeyChecking=accept-new',
         '-o',
