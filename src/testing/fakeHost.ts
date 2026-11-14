@@ -238,6 +238,7 @@ export const createTestApp = ({
   const queries: { label: string; operation: QueryOperation }[] = []
   const app = createApp({
     database: new Database(':memory:', { strict: true }),
+    dataDir: root,
     transport: createFakeTransport(root, (label, operation) =>
       queries.push({ label, operation }),
     ),

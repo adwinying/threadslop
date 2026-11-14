@@ -34,6 +34,7 @@ export const start = async ({
       create: true,
       strict: true,
     }),
+    dataDir: config.DATA_DIR,
     hosts: config.HOSTS,
     transport: createSshTransport({ dataDir: config.DATA_DIR }),
     clock: () => new Date(),

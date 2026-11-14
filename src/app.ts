@@ -18,6 +18,8 @@ const logFailure = (job: string) => (error: unknown) => {
 export type AppCollaborators = {
   /** Opened with `{ strict: true }`, so queries bind `$name` params by name. */
   database: Database
+  /** Where the Snapshot is written. */
+  dataDir: string
   hosts: Host[]
   transport: HostTransport
   clock: () => Date
@@ -27,6 +29,7 @@ export type AppCollaborators = {
 
 export const createApp = ({
   database,
+  dataDir,
   hosts,
   transport,
   clock,
@@ -60,7 +63,7 @@ export const createApp = ({
         // 06:00 run.
         pattern: '45 5 * * *',
         timezone: 'Asia/Tokyo',
-        run: () => snapshot(database),
+        run: () => snapshot(database, dataDir),
         paused: pauseCrons,
         catch: logFailure('Snapshot'),
       }),

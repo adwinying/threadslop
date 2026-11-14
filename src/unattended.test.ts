@@ -135,23 +135,20 @@ describe('the Snapshot cron job', () => {
     expect(snapshot.options.timezone).toBe('Asia/Tokyo')
   })
 
-  test('writes a readable backup with the same row counts', async () => {
+  test('writes a readable Snapshot with the same row counts to the data directory', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'data-'))
-    const database = new Database(join(dataDir, 'threadslop.sqlite'), {
-      create: true,
-      strict: true,
-    })
-    testApp = createTestApp({ database })
+    const database = new Database(':memory:', { strict: true })
+    testApp = createTestApp({ database, dataDir })
     createHive(testApp.root)
     await sync()
 
     await testApp.app.store.cron.snapshot.trigger()
 
-    const backup = new Database(join(dataDir, 'threadslop.backup.sqlite'), {
+    const snapshotDb = new Database(join(dataDir, 'threadslop.backup.sqlite'), {
       readonly: true,
     })
-    expect(rowCounts(backup)).toEqual(rowCounts(database))
-    expect(rowCounts(backup)).toContainEqual(['items', 1])
-    expect(readdirSync(dataDir)).not.toContain('threadslop.backup.sqlite.tmp')
+    expect(rowCounts(snapshotDb)).toEqual(rowCounts(database))
+    expect(rowCounts(snapshotDb)).toContainEqual(['items', 1])
+    expect(readdirSync(dataDir)).toEqual(['threadslop.backup.sqlite'])
   })
 })
