@@ -311,3 +311,45 @@ describe('GET /threads/:host/:threadId', () => {
     expect((await getThread('hive', threadId)).status).toBe(404)
   })
 })
+
+describe('POST /sync with unexpected Item payloads', () => {
+  test('still syncs the Host and falls back to the Item update time', async () => {
+    const item = { threadId: 'thread-1', type: 'assistant_message' }
+    hive.addRawItem({
+      ...item,
+      id: 'no-times',
+      ordinal: 30,
+      updatedAt: '2026-11-01T00:00:03.000Z',
+      payload: JSON.stringify({ text: 'Answer without times' }),
+    })
+    hive.addRawItem({
+      ...item,
+      id: 'garbled',
+      ordinal: 40,
+      updatedAt: '2026-11-01T00:00:04.000Z',
+      payload: 'not JSON at all',
+    })
+
+    const response = await sync()
+
+    expect(await response.json()).toEqual({
+      hosts: [{ host: 'hive', ok: true, threadsPulled: 1 }],
+    })
+    const thread = await get('/threads/hive/thread-1')
+    const { items } = (await thread.json()) as { items: unknown[] }
+    expect(items.slice(1)).toEqual([
+      expect.objectContaining({
+        id: 'no-times',
+        createdAt: '2026-11-01T00:00:03.000Z',
+        completedAt: null,
+        text: 'Answer without times',
+      }),
+      expect.objectContaining({
+        id: 'garbled',
+        createdAt: '2026-11-01T00:00:04.000Z',
+        completedAt: null,
+        text: 'not JSON at all',
+      }),
+    ])
+  })
+})

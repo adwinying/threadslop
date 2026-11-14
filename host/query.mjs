@@ -59,6 +59,27 @@ const parseThreadIds = (input) => {
   return ids
 }
 
+const parseJson = (text) => {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+const textOrNull = (value) => (typeof value === 'string' ? value : null)
+
+// T3 keeps Item times only in the payload. One missing or malformed must not
+// fail the Sync, so the start falls back to the Item's update time.
+const withTimes = (item) => {
+  const payload = parseJson(item.payload)
+  return {
+    ...item,
+    createdAt: textOrNull(payload?.startedAt) ?? item.updatedAt,
+    completedAt: textOrNull(payload?.completedAt),
+  }
+}
+
 const threads = () => {
   const ids = JSON.stringify(parseThreadIds(readFileSync(0, 'utf8')))
   const db = openDatabase()
@@ -83,7 +104,10 @@ const threads = () => {
     )
     .all(ids)
 
-  const itemsByThread = Map.groupBy(itemRows, ({ threadId }) => threadId)
+  const itemsByThread = Map.groupBy(
+    itemRows.map(withTimes),
+    ({ threadId }) => threadId,
+  )
   return {
     threads: threadRows.map((thread) => ({
       ...thread,

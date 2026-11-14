@@ -15,11 +15,6 @@ const signaturesSchema = z.object({
   ),
 })
 
-const itemTimesSchema = z.object({
-  startedAt: z.string(),
-  completedAt: z.string().nullish(),
-})
-
 const threadsSchema = z.object({
   threads: z.array(
     z.object({
@@ -36,6 +31,8 @@ const threadsSchema = z.object({
           type: z.string(),
           status: z.string(),
           ordinal: z.number(),
+          createdAt: z.string(),
+          completedAt: z.string().nullable(),
           updatedAt: z.string(),
           payload: z.string(),
         }),
@@ -81,17 +78,10 @@ const toArchivedThread = (
 ): ArchivedThread => ({
   ...thread,
   signature,
-  items: items.map((item) => {
-    const { startedAt, completedAt } = itemTimesSchema.parse(
-      JSON.parse(item.payload),
-    )
-    return {
-      ...item,
-      createdAt: startedAt,
-      completedAt: completedAt ?? null,
-      searchText: extractSearchText(item.type, item.payload),
-    }
-  }),
+  items: items.map((item) => ({
+    ...item,
+    searchText: extractSearchText(item.type, item.payload),
+  })),
 })
 
 export const syncHost = async (

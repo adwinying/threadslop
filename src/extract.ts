@@ -49,11 +49,20 @@ const extractors = new Map<string, z.ZodType<string, unknown>>([
   ],
 ])
 
+const parseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * The text indexed for search, chosen by Item type. Unknown types, and
- * payloads whose shape T3 has since changed, fall back to the raw payload.
+ * payloads that aren't JSON or whose shape T3 has since changed, fall back to
+ * the raw payload.
  */
 export const extractSearchText = (type: string, payload: string) => {
-  const extracted = extractors.get(type)?.safeParse(JSON.parse(payload))
+  const extracted = extractors.get(type)?.safeParse(parseJson(payload))
   return extracted?.success ? extracted.data : payload
 }

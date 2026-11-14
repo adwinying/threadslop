@@ -54,6 +54,15 @@ type ItemFixture = {
   [field: string]: unknown
 }
 
+type RawItemFixture = {
+  id: string
+  threadId: string
+  ordinal: number
+  type: string
+  updatedAt: string
+  payload: string
+}
+
 const messagePayload = ({ role, ...message }: MessageFixture) =>
   JSON.stringify({
     ...message,
@@ -84,6 +93,16 @@ export const createFakeHost = (root: string, label: string) => {
        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL)`,
   )
 
+  const insertItem = (item: RawItemFixture) => {
+    db.query(
+      `INSERT INTO orchestration_v2_projection_turn_items
+        (turn_item_id, thread_id, ordinal, type, status, updated_at,
+         payload_json)
+       VALUES ($id, $threadId, $ordinal, $type, 'completed', $updatedAt,
+         $payload)`,
+    ).run(item)
+  }
+
   return {
     label,
     home,
@@ -96,13 +115,7 @@ export const createFakeHost = (root: string, label: string) => {
       ).run({ id, title, updatedAt })
     },
     addMessage: (message: MessageFixture) => {
-      db.query(
-        `INSERT INTO orchestration_v2_projection_turn_items
-          (turn_item_id, thread_id, ordinal, type, status, updated_at,
-           payload_json)
-         VALUES ($id, $threadId, $ordinal, $type, 'completed', $updatedAt,
-           $payload)`,
-      ).run({
+      insertItem({
         id: message.id,
         threadId: message.threadId,
         ordinal: message.ordinal,
@@ -111,6 +124,8 @@ export const createFakeHost = (root: string, label: string) => {
         payload: messagePayload(message),
       })
     },
+    /** Adds an Item whose payload is stored verbatim, however malformed. */
+    addRawItem: insertItem,
     /** Adds an Item of any type; extra fields go into its payload. */
     addItem: ({
       id,
@@ -120,13 +135,7 @@ export const createFakeHost = (root: string, label: string) => {
       updatedAt,
       ...fields
     }: ItemFixture) => {
-      db.query(
-        `INSERT INTO orchestration_v2_projection_turn_items
-          (turn_item_id, thread_id, ordinal, type, status, updated_at,
-           payload_json)
-         VALUES ($id, $threadId, $ordinal, $type, 'completed', $updatedAt,
-           $payload)`,
-      ).run({
+      insertItem({
         id,
         threadId,
         ordinal,
