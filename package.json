@@ -3,10 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "bun run src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --deny-warnings && oxfmt --check",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "install-host": "bun run src/installHost.ts"
   },
   "dependencies": {
     "@elysiajs/cron": "^1.4.2",
