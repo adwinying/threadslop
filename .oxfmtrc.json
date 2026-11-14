@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 80,
+  "semi": false,
+  "singleQuote": true,
+  "tabWidth": 2,
+  "trailingComma": "all",
+  "sortImports": {
+    "groups": [
+      "type",
+      "builtin",
+      "external",
+      "internal",
+      "parent",
+      "sibling",
+      "index",
+      "unknown"
+    ],
+    "newlinesBetween": false
+  },
+  "ignorePatterns": ["bun.lock"]
+}
