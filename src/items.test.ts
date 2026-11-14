@@ -1,8 +1,7 @@
 import type { FakeHost } from '~/testing/fakeHost'
 import { beforeEach, describe, expect, test } from 'bun:test'
+import { z } from 'zod'
 import { createFakeHost, createTestApp } from '~/testing/fakeHost'
-
-type Hit = { host: string; threadId: string; snippet: string }
 
 let hive: FakeHost
 let testApp: ReturnType<typeof createTestApp>
@@ -44,7 +43,9 @@ const search = async (q: string, items?: 'messages' | 'all') => {
   const params = new URLSearchParams({ q, ...(items && { items }) })
   const response = await get(`/search?${params}`)
   expect(response.status).toBe(200)
-  const { hits } = (await response.json()) as { hits: Hit[] }
+  const { hits } = z
+    .object({ hits: z.array(z.unknown()) })
+    .parse(await response.json())
   return hits
 }
 
@@ -250,9 +251,17 @@ describe('GET /threads/:host/:threadId', () => {
 
     const response = await getThread('hive', threadId, 'all')
 
-    const { items } = (await response.json()) as {
-      items: { id: string; role: string | null; text: string }[]
-    }
+    const { items } = z
+      .object({
+        items: z.array(
+          z.object({
+            id: z.string(),
+            role: z.string().nullable(),
+            text: z.string(),
+          }),
+        ),
+      })
+      .parse(await response.json())
     expect(items.map(({ id }) => id)).toEqual(['question', 'command', 'reply'])
     expect(items[1]).toEqual(
       expect.objectContaining({
@@ -267,9 +276,11 @@ describe('GET /threads/:host/:threadId', () => {
 
     const response = await getThread('hive', threadId, 'all')
 
-    const { items } = (await response.json()) as {
-      items: { id: string; payload: string }[]
-    }
+    const { items } = z
+      .object({
+        items: z.array(z.object({ id: z.string(), payload: z.string() })),
+      })
+      .parse(await response.json())
     expect(JSON.parse(items[1]?.payload ?? '')).toEqual(
       expect.objectContaining({
         id: 'command',
@@ -353,7 +364,9 @@ describe('POST /sync with unexpected Item payloads', () => {
       hosts: [{ host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 0 }],
     })
     const thread = await get('/threads/hive/thread-1')
-    const { items } = (await thread.json()) as { items: unknown[] }
+    const { items } = z
+      .object({ items: z.array(z.unknown()) })
+      .parse(await thread.json())
     expect(items.slice(1)).toEqual([
       expect.objectContaining({
         id: 'no-times',

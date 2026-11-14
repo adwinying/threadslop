@@ -1,5 +1,6 @@
 import type { FakeHost } from '~/testing/fakeHost'
 import { beforeEach, describe, expect, test } from 'bun:test'
+import { z } from 'zod'
 import { createFakeHost, createTestApp } from '~/testing/fakeHost'
 
 const delegatedThreadId = 'thread:delegated-task:command%3Amcp%3Aabc'
@@ -51,7 +52,9 @@ const get = (query: Record<string, string>) =>
 const search = async (query: Record<string, string>) => {
   const response = await get(query)
   expect(response.status).toBe(200)
-  const { hits } = (await response.json()) as { hits: unknown[] }
+  const { hits } = z
+    .object({ hits: z.array(z.unknown()) })
+    .parse(await response.json())
   return hits
 }
 

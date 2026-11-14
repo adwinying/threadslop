@@ -125,6 +125,8 @@ try {
   }
   process.stdout.write(JSON.stringify(operations[operation]()))
 } catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.message : error}\n`)
+  process.stderr.write(
+    `${error instanceof Error ? error.message : String(error)}\n`,
+  )
   process.exitCode = 1
 }

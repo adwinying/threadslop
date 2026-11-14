@@ -74,6 +74,8 @@ describe('ssh Host transport', () => {
     chmodSync(ssh, 0o755)
     const transport = createSshTransport({ dataDir: '/data', ssh })
 
+    // bun-types types `rejects` matchers as sync, but they return a Promise.
+    // oxlint-disable-next-line typescript/await-thenable -- without await the test ends before the assertion
     await expect(transport(hive, 'signatures')).rejects.toThrow(
       'Host key verification failed.',
     )

@@ -80,13 +80,12 @@ export const createSearch = (db: Database) => {
 
   return (query: string, { host, items, limit }: SearchOptions) => {
     const filters = { host: host ?? null, all: items === 'all', limit }
+    // Spread counts code points, as SQLite's trigram tokenizer does.
+    // oxlint-disable-next-line typescript/no-misused-spread -- graphemes would miscount
+    const isShort = [...query].length < 3
     return (
-      [...query].length < 3
-        ? shortItemsQuery.all({
-            pattern: toPattern(query),
-            query,
-            ...filters,
-          })
+      isShort
+        ? shortItemsQuery.all({ pattern: toPattern(query), query, ...filters })
         : itemsQuery.all({ phrase: toPhrase(query), ...filters })
     ).map(toHit)
   }

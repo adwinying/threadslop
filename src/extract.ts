@@ -8,7 +8,7 @@ const toText = (value: unknown) => {
 
 const messageText = z.object({ text: z.string() }).transform(({ text }) => text)
 
-const extractors = new Map<string, z.ZodType<string, unknown>>([
+const extractors = new Map<string, z.ZodType<string>>([
   ['user_message', messageText],
   ['assistant_message', messageText],
   ['reasoning', messageText],

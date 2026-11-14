@@ -1,8 +1,7 @@
 import type { FakeHost } from '~/testing/fakeHost'
 import { beforeEach, describe, expect, test } from 'bun:test'
+import { z } from 'zod'
 import { createFakeHost, createTestApp } from '~/testing/fakeHost'
-
-type Hit = { host: string; threadId: string; archived: boolean }
 
 let hive: FakeHost
 let crefil: FakeHost
@@ -41,7 +40,9 @@ const sync = () => testApp.sync()
 const search = async (q: string) => {
   const response = await testApp.handle(`/search?q=${encodeURIComponent(q)}`)
   expect(response.status).toBe(200)
-  const { hits } = (await response.json()) as { hits: Hit[] }
+  const { hits } = z
+    .object({ hits: z.array(z.unknown()) })
+    .parse(await response.json())
   return hits
 }
 
