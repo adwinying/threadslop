@@ -4,6 +4,8 @@ The container on nas pulls from each Host over plain SSH on the tailnet. Its key
 
 Hosts are installed from inside the container with `threadslop install-host <user@host>`. It logs in with the Host's password, typed once at the tty and never stored, with public-key auth off: once threadslop's key is authorized, its forced command would swallow the install script. The Host list lives in the data directory next to the key, and every Sync re-reads it, so adding a Host needs no restart.
 
+threadslop requests the full query command, with the operation as its last word, rather than the bare operation. A Host behind Tailscale SSH (hive) ignores `authorized_keys`, so the forced command never applies there: requesting the full command keeps Syncs working, but nas has a full shell on that Host. That's accepted for hive, an agent box. Turning off Tailscale SSH restores the restriction.
+
 ## Considered Options
 
 - **Push from each Host:** needs a timer and sync state on every Host, which spreads logic across machines.

@@ -64,7 +64,7 @@ describe('ssh Host transport', () => {
       '-i',
       '/data/id_ed25519',
       'adwin@hive',
-      'threads',
+      '~/.nix-profile/bin/node --disable-warning=ExperimentalWarning ~/.local/share/threadslop/query.mjs threads',
     ])
   })
 

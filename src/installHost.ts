@@ -14,12 +14,9 @@ import {
   hostsFile,
   readHosts,
 } from '~/hosts'
-import { ensureSshKey } from '~/ssh'
+import { ensureSshKey, queryCommand } from '~/ssh'
 
 const publicKeyPattern = /^ssh-ed25519 [A-Za-z0-9+/]+={0,2} ([\w.@-]+)$/
-
-const forcedCommand =
-  '~/.nix-profile/bin/node --disable-warning=ExperimentalWarning ~/.local/share/threadslop/query.mjs'
 
 /**
  * A POSIX sh script for the Host that installs the query script and upserts
@@ -37,7 +34,7 @@ export const installScript = ({
     throw new Error(`not an ed25519 public key: ${publicKey}`)
   }
   // The pattern admits no quotes, so single-quoting below is safe.
-  const line = `restrict,command="${forcedCommand}" ${publicKey}`
+  const line = `restrict,command="${queryCommand}" ${publicKey}`
 
   return `set -eu
 dir="$HOME/.local/share/threadslop"

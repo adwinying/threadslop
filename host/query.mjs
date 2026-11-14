@@ -1,5 +1,7 @@
-// threadslop's forced command on each Host. sshd runs it with the requested
-// operation in SSH_ORIGINAL_COMMAND. It reads T3's database read-only and
+// threadslop's forced command on each Host. threadslop requests the full
+// command with the operation as its last word: sshd's forced command passes
+// that in SSH_ORIGINAL_COMMAND, and Tailscale SSH, which ignores
+// authorized_keys, runs it as given, so the operation arrives as an argument. It reads T3's database read-only and
 // writes pure JSON to stdout. This is the only file that knows T3's schema.
 //
 //   signatures  The environment ID, each Thread's Signature, and how many
@@ -119,7 +121,10 @@ const threads = () => {
 const operations = { signatures, threads }
 
 try {
-  const operation = process.env.SSH_ORIGINAL_COMMAND ?? ''
+  const operation =
+    process.argv[2] ??
+    (process.env.SSH_ORIGINAL_COMMAND ?? '').trim().split(/\s+/).at(-1) ??
+    ''
   if (!Object.hasOwn(operations, operation)) {
     throw new Error(`unknown operation: ${JSON.stringify(operation)}`)
   }
