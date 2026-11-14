@@ -9,7 +9,7 @@ const unreachableTransport: HostTransport = async () => {
 
 const createTestApp = () =>
   createApp({
-    database: new Database(':memory:'),
+    database: new Database(':memory:', { strict: true }),
     hosts: [{ label: 'hive', destination: 'adwin@hive' }],
     transport: unreachableTransport,
     clock: () => new Date('2026-11-14T00:00:00Z'),
