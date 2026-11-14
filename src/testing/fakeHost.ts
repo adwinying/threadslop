@@ -226,8 +226,9 @@ type TestAppOptions = Partial<Omit<AppCollaborators, 'hosts'>> & {
 }
 
 /**
- * An app wired to fake Hosts under a fresh root, with an in-memory archive and
- * a fixed clock. A Host without a fixture fails like an offline one.
+ * An app wired to fake Hosts under a fresh root, with an in-memory archive, a
+ * fixed clock and paused cron jobs. A Host without a fixture fails like an
+ * offline one.
  */
 export const createTestApp = ({
   hosts = ['hive'],
@@ -241,6 +242,7 @@ export const createTestApp = ({
       queries.push({ label, operation }),
     ),
     clock: () => testNow,
+    pauseCrons: true,
     ...collaborators,
     hosts: hosts.map((label) => ({ label, destination: `adwin@${label}` })),
   })

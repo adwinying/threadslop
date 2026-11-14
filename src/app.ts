@@ -21,6 +21,8 @@ export type AppCollaborators = {
   hosts: Host[]
   transport: HostTransport
   clock: () => Date
+  /** Registers the cron jobs without letting them fire; tests trigger them. */
+  pauseCrons?: boolean
 }
 
 export const createApp = ({
@@ -28,6 +30,7 @@ export const createApp = ({
   hosts,
   transport,
   clock,
+  pauseCrons = false,
 }: AppCollaborators) => {
   migrate(database)
   const archive = createArchive(database)
@@ -46,6 +49,7 @@ export const createApp = ({
         name: 'sync',
         pattern: '*/5 * * * *',
         run: sync,
+        paused: pauseCrons,
         catch: logFailure('Sync'),
       }),
     )
@@ -57,6 +61,7 @@ export const createApp = ({
         pattern: '45 5 * * *',
         timezone: 'Asia/Tokyo',
         run: () => snapshot(database),
+        paused: pauseCrons,
         catch: logFailure('Snapshot'),
       }),
     )

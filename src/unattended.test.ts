@@ -119,6 +119,14 @@ describe('the Sync cron job', () => {
   })
 })
 
+describe('cron jobs in a test app', () => {
+  test('never fire on their own', () => {
+    const jobs = Object.values(testApp.app.store.cron)
+
+    expect(jobs.map((job) => job.isRunning())).toEqual([false, false])
+  })
+})
+
 describe('the Snapshot cron job', () => {
   test('runs daily at 05:45 Asia/Tokyo', () => {
     const { snapshot } = testApp.app.store.cron
