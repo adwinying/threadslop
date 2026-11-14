@@ -68,8 +68,8 @@ describe('POST /sync', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       hosts: [
-        { host: 'hive', ok: true, threadsPulled: 1 },
-        { host: 'crefil', ok: true, threadsPulled: 1 },
+        { host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 0 },
+        { host: 'crefil', ok: true, threadsPulled: 1, threadsSkipped: 0 },
       ],
     })
     expect(await search('redirect loop')).toEqual([
@@ -96,8 +96,8 @@ describe('POST /sync again', () => {
 
     expect(await response.json()).toEqual({
       hosts: [
-        { host: 'hive', ok: true, threadsPulled: 0 },
-        { host: 'crefil', ok: true, threadsPulled: 0 },
+        { host: 'hive', ok: true, threadsPulled: 0, threadsSkipped: 0 },
+        { host: 'crefil', ok: true, threadsPulled: 0, threadsSkipped: 0 },
       ],
     })
     expect(threadFetches()).toEqual([])
@@ -177,5 +177,36 @@ describe('POST /sync on a large Host', () => {
         expect.objectContaining({ threadId: `thread-${n}` }),
       ])
     }
+  })
+})
+
+describe('POST /sync with an unsafe Thread ID', () => {
+  test('skips that Thread and syncs the rest of its Host', async () => {
+    hive.addThread({
+      id: 'thread 2',
+      title: 'Unsafe',
+      updatedAt: '2026-11-01T00:00:00.000Z',
+    })
+    hive.addMessage({
+      id: 'item-unsafe',
+      threadId: 'thread 2',
+      ordinal: 1,
+      role: 'user',
+      text: 'Never fetched',
+      updatedAt: '2026-11-01T00:00:01.000Z',
+    })
+
+    const response = await sync()
+
+    expect(await response.json()).toEqual({
+      hosts: [
+        { host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 1 },
+        { host: 'crefil', ok: true, threadsPulled: 1, threadsSkipped: 0 },
+      ],
+    })
+    expect(await search('redirect loop')).toEqual([
+      expect.objectContaining({ host: 'hive', threadId: 'thread-1' }),
+    ])
+    expect(await search('never fetched')).toEqual([])
   })
 })

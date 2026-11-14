@@ -2,7 +2,8 @@
 // operation in SSH_ORIGINAL_COMMAND. It reads T3's database read-only and
 // writes pure JSON to stdout. This is the only file that knows T3's schema.
 //
-//   signatures  The environment ID and each Thread's Signature.
+//   signatures  The environment ID, each Thread's Signature, and how many
+//               Threads were skipped for an unsafe ID.
 //   threads     Thread IDs as a JSON array on stdin; those Threads and Items.
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -34,9 +35,13 @@ const signatures = () => {
        GROUP BY t.thread_id`,
     )
     .all()
+  // `threads` would refuse an unsafe ID, stalling the whole Host, so those
+  // Threads are left out and only counted.
+  const safe = rows.filter(({ id }) => threadIdPattern.test(id))
   return {
     environmentId,
-    threads: rows.map((row) => ({ ...row, deleted: row.deleted === 1 })),
+    threads: safe.map((row) => ({ ...row, deleted: row.deleted === 1 })),
+    skipped: rows.length - safe.length,
   }
 }
 

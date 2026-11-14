@@ -56,7 +56,7 @@ describe('POST /sync with a failing Host', () => {
     expect(await response.json()).toEqual({
       hosts: [
         { host: 'mayonaca', ok: false, error: expect.any(String) },
-        { host: 'hive', ok: true, threadsPulled: 1 },
+        { host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 0 },
       ],
     })
     const search = await handle('/search?q=redirect')
