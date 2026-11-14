@@ -1,5 +1,5 @@
 import type { FakeHost } from '~/testing/fakeHost'
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { z } from 'zod'
 import { createFakeHost, createTestApp } from '~/testing/fakeHost'
 
@@ -170,7 +170,8 @@ describe('POST /sync on a large Host', () => {
 })
 
 describe('POST /sync with an unsafe Thread ID', () => {
-  test('skips that Thread and syncs the rest of its Host', async () => {
+  test('skips that Thread, warns about it and syncs the rest of its Host', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
     hive.addThread({
       id: 'thread 2',
       title: 'Unsafe',
@@ -191,5 +192,9 @@ describe('POST /sync with an unsafe Thread ID', () => {
       expect.objectContaining({ host: 'hive', threadId: 'thread-1' }),
     ])
     expect(await search('never fetched')).toEqual([])
+    expect(warn).toHaveBeenCalledWith(
+      'threadslop: hive skipped 1 Thread with an unsafe ID',
+    )
+    warn.mockRestore()
   })
 })

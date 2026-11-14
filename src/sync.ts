@@ -13,6 +13,7 @@ const signaturesSchema = z.object({
       deleted: z.boolean(),
     }),
   ),
+  skipped: z.number(),
 })
 
 const threadsSchema = z.object({
@@ -89,10 +90,17 @@ export const syncHost = async (
   transport: HostTransport,
   host: Host,
 ) => {
-  const { environmentId, threads: reported } = signaturesSchema.parse(
-    JSON.parse(await transport(host, 'signatures')),
-  )
+  const {
+    environmentId,
+    threads: reported,
+    skipped,
+  } = signaturesSchema.parse(JSON.parse(await transport(host, 'signatures')))
   archive.recordHost(host.label, environmentId)
+  if (skipped > 0) {
+    console.warn(
+      `threadslop: ${host.label} skipped ${skipped} Thread${skipped === 1 ? '' : 's'} with an unsafe ID`,
+    )
+  }
 
   const stored = archive.signatures(host.label)
   const changed = reported.filter(
