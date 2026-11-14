@@ -45,13 +45,16 @@ const signatures = () => {
   }
 }
 
-const parseThreadIds = (input) => {
-  let ids
+const parseJson = (text) => {
   try {
-    ids = JSON.parse(input)
+    return JSON.parse(text)
   } catch {
-    throw new Error('stdin must be a JSON array of Thread IDs')
+    return undefined
   }
+}
+
+const parseThreadIds = (input) => {
+  const ids = parseJson(input)
   if (!Array.isArray(ids)) {
     throw new Error('stdin must be a JSON array of Thread IDs')
   }
@@ -62,14 +65,6 @@ const parseThreadIds = (input) => {
     throw new Error(`invalid Thread ID: ${JSON.stringify(invalid)}`)
   }
   return ids
-}
-
-const parseJson = (text) => {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
 }
 
 const textOrNull = (value) => (typeof value === 'string' ? value : null)
