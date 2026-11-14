@@ -101,6 +101,24 @@ describe('threadslop install-host', () => {
     expect(host.hostsFile().match(/adwin@hive/g)).toHaveLength(1)
   })
 
+  test("replaces an earlier threadslop key's line, so an old key or command doesn't linger", async () => {
+    const host = setup()
+    const ssh = join(host.home, '.ssh')
+    mkdirSync(ssh, { mode: 0o700 })
+    writeFileSync(
+      join(ssh, 'authorized_keys'),
+      'ssh-ed25519 AAAA me\nrestrict,command="old" ssh-ed25519 BBBB threadslop@nas\nssh-ed25519 CCCC other\n',
+      { mode: 0o600 },
+    )
+
+    await host.install('adwin@hive')
+
+    expect(host.read('.ssh/authorized_keys')).toBe(
+      `ssh-ed25519 AAAA me\nssh-ed25519 CCCC other\n${host.authorizedLine()}\n`,
+    )
+    expect(host.mode('.ssh/authorized_keys')).toBe(0o600)
+  })
+
   test('keeps existing keys and their permissions', async () => {
     const host = setup()
     const ssh = join(host.home, '.ssh')

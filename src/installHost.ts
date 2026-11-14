@@ -16,14 +16,14 @@ import {
 } from '~/hosts'
 import { ensureSshKey } from '~/ssh'
 
-const publicKeyPattern = /^ssh-ed25519 ([A-Za-z0-9+/]+={0,2}) [\w.@-]+$/
+const publicKeyPattern = /^ssh-ed25519 [A-Za-z0-9+/]+={0,2} ([\w.@-]+)$/
 
 const forcedCommand =
   '~/.nix-profile/bin/node --disable-warning=ExperimentalWarning ~/.local/share/threadslop/query.mjs'
 
 /**
- * A POSIX sh script for the Host that installs the query script and appends
- * the key's `authorized_keys` line unless the key is already there.
+ * A POSIX sh script for the Host that installs the query script and upserts
+ * the key's `authorized_keys` line, replacing any line with the same comment.
  */
 export const installScript = ({
   publicKey,
@@ -32,8 +32,8 @@ export const installScript = ({
   publicKey: string
   queryScript: string
 }) => {
-  const keyBlob = publicKeyPattern.exec(publicKey)?.[1]
-  if (keyBlob === undefined) {
+  const comment = publicKeyPattern.exec(publicKey)?.[1]
+  if (comment === undefined) {
     throw new Error(`not an ed25519 public key: ${publicKey}`)
   }
   // The pattern admits no quotes, so single-quoting below is safe.
@@ -49,14 +49,12 @@ umask 077
 [ -d "$HOME/.ssh" ] || mkdir "$HOME/.ssh"
 keys="$HOME/.ssh/authorized_keys"
 [ -e "$keys" ] || : > "$keys"
-if grep -qF '${keyBlob}' "$keys"; then
-  echo 'threadslop: key already authorized, query script updated'
-  exit 0
-fi
-if [ -s "$keys" ] && [ -n "$(tail -c 1 "$keys")" ]; then
-  echo >> "$keys"
-fi
-printf '%s\\n' '${line}' >> "$keys"
+# Rewrite in place, so the file keeps its permissions.
+tmp="$keys.threadslop"
+awk -v comment='${comment}' '$NF != comment' "$keys" > "$tmp"
+printf '%s\\n' '${line}' >> "$tmp"
+cat "$tmp" > "$keys"
+rm "$tmp"
 echo 'threadslop: key authorized, query script installed'
 `
 }
