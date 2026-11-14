@@ -33,12 +33,13 @@ export const createThreadReader = (db: Database) => {
       completedAt: string | null
       updatedAt: string
       text: string
+      payload: string
     },
     Key & { all: boolean }
   >(
     `SELECT item_id AS id, type, status, ordinal, created_at AS createdAt,
             completed_at AS completedAt, updated_at AS updatedAt,
-            search_text AS text
+            search_text AS text, payload
      FROM items i
      WHERE host = $host AND thread_id = $threadId AND ${inScopeSql}
      ORDER BY ordinal`,

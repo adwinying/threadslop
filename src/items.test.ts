@@ -262,6 +262,23 @@ describe('GET /threads/:host/:threadId', () => {
     )
   })
 
+  test("returns each Item's raw payload", async () => {
+    await sync()
+
+    const response = await getThread('hive', threadId, 'all')
+
+    const { items } = (await response.json()) as {
+      items: { id: string; payload: string }[]
+    }
+    expect(JSON.parse(items[1]?.payload ?? '')).toEqual(
+      expect.objectContaining({
+        id: 'command',
+        input: 'cat auth.log',
+        output: 'token expired at 12:00',
+      }),
+    )
+  })
+
   test('flags a Thread archived on its Host', async () => {
     hive.archiveThread(threadId, '2026-11-03T00:00:00.000Z')
     await sync()
