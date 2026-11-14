@@ -1,10 +1,15 @@
 import type { FakeHost } from '~/testing/fakeHost'
 import { Database } from 'bun:sqlite'
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createFakeHost, createTestApp, testNow } from '~/testing/fakeHost'
+import {
+  createFakeHost,
+  createTestApp,
+  testNow,
+  waitForSync,
+} from '~/testing/fakeHost'
 
 const rowCounts = (db: Database) =>
   db
@@ -51,14 +56,8 @@ const sync = () => testApp.sync()
 
 describe('POST /sync with a failing Host', () => {
   test('syncs the other Hosts and /health shows the failure', async () => {
-    const response = await sync()
+    await sync()
 
-    expect(await response.json()).toEqual({
-      hosts: [
-        { host: 'mayonaca', ok: false, error: expect.any(String) },
-        { host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 0 },
-      ],
-    })
     const search = await handle('/search?q=redirect')
     expect(await search.json()).toEqual({
       hits: [expect.objectContaining({ host: 'hive', threadId: 'thread-1' })],
@@ -67,6 +66,7 @@ describe('POST /sync with a failing Host', () => {
     const health = await handle('/health')
     expect(health.status).toBe(200)
     expect(await health.json()).toEqual({
+      syncing: false,
       hosts: [
         {
           host: 'mayonaca',
@@ -87,17 +87,54 @@ describe('POST /sync with a failing Host', () => {
   })
 })
 
-describe('two concurrent POST /sync calls', () => {
-  test('run one Sync and both return its result', async () => {
-    const [first, second] = await Promise.all([sync(), sync()])
+describe('two POST /sync calls during one Sync', () => {
+  test('start it, then report it running, and run it once', async () => {
+    const post = () => testApp.handle('/sync', { method: 'POST' })
 
+    const first = await post()
+    const second = await post()
+    await waitForSync(testApp.handle)
+
+    expect(first.status).toBe(202)
+    expect(await first.json()).toEqual({ status: 'started' })
+    expect(second.status).toBe(202)
+    expect(await second.json()).toEqual({ status: 'running' })
     expect(
       testApp.queries.filter(({ operation }) => operation === 'signatures'),
     ).toEqual([
       { label: 'mayonaca', operation: 'signatures' },
       { label: 'hive', operation: 'signatures' },
     ])
-    expect(await second.json()).toEqual(await first.json())
+  })
+})
+
+describe('/health during a Sync', () => {
+  test('reports syncing until the Sync is done', async () => {
+    await testApp.handle('/sync', { method: 'POST' })
+
+    const during = await (await handle('/health')).json()
+    await waitForSync(testApp.handle)
+    const after = await (await handle('/health')).json()
+
+    expect(during).toEqual(expect.objectContaining({ syncing: true }))
+    expect(after).toEqual(expect.objectContaining({ syncing: false }))
+  })
+})
+
+describe('POST /sync when the Sync itself fails', () => {
+  test('logs the failure and ends the Sync', async () => {
+    const error = spyOn(console, 'error').mockImplementation(() => undefined)
+    testApp = createTestApp({
+      clock: () => {
+        throw new Error('clock broke')
+      },
+    })
+
+    const response = await sync()
+
+    expect(response.status).toBe(202)
+    expect(error).toHaveBeenCalledWith('Sync failed:', new Error('clock broke'))
+    error.mockRestore()
   })
 })
 
@@ -112,7 +149,7 @@ describe('the Sync cron job', () => {
       testApp.app.store.cron.sync.trigger(),
     ])
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(202)
     expect(
       testApp.queries.filter(({ operation }) => operation === 'signatures'),
     ).toHaveLength(2)

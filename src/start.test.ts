@@ -7,6 +7,7 @@ import {
   createFakeHost,
   createFakeHostRoot,
   createFakeTransport,
+  waitForSync,
 } from '~/testing/fakeHost'
 
 const createDataDir = () => mkdtempSync(join(tmpdir(), 'start-'))
@@ -22,6 +23,10 @@ const startService = async (dataDir: string, root = createFakeHostRoot()) => {
   const handle = (path: string, init?: RequestInit) =>
     app.handle(new Request(`http://localhost${path}`, init))
   return Object.assign(handle, {
+    sync: async () => {
+      await handle('/sync', { method: 'POST' })
+      await waitForSync(handle)
+    },
     cronSync: () => app.store.cron.sync.trigger(),
   })
 }
@@ -66,7 +71,7 @@ describe('the Host list file', () => {
       .split('\n')
     expect(lines.length).toBeGreaterThan(0)
     expect(lines.every((line) => line.startsWith('#'))).toBe(true)
-    expect(await health(handle)).toEqual({ hosts: [] })
+    expect(await health(handle)).toEqual({ syncing: false, hosts: [] })
   })
 
   test('is kept as it is on restart', async () => {
@@ -77,6 +82,7 @@ describe('the Host list file', () => {
 
     expect(readFileSync(join(dataDir, 'hosts'), 'utf8')).toBe('adwin@hive\n')
     expect(await health(handle)).toEqual({
+      syncing: false,
       hosts: [expect.objectContaining({ host: 'hive' })],
     })
   })
@@ -91,6 +97,7 @@ describe('the Host list file', () => {
     )
 
     expect(await health(handle)).toEqual({
+      syncing: false,
       hosts: [
         expect.objectContaining({ host: 'hive' }),
         expect.objectContaining({ host: 'crefil' }),
@@ -114,11 +121,9 @@ describe('POST /sync with the Host list file', () => {
     const handle = await startService(dataDir, root)
 
     writeFileSync(join(dataDir, 'hosts'), 'adwin@hive\n')
-    const response = await handle('/sync', { method: 'POST' })
+    await handle.sync()
 
-    expect(await response.json()).toEqual({
-      hosts: [{ host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 0 }],
-    })
+    expect((await handle('/threads/hive/thread-1')).status).toBe(200)
   })
 
   test('keeps the archive of a Host removed from the file', async () => {
@@ -127,12 +132,12 @@ describe('POST /sync with the Host list file', () => {
     addHiveThread(root)
     writeFileSync(join(dataDir, 'hosts'), 'adwin@hive\n')
     const handle = await startService(dataDir, root)
-    await handle('/sync', { method: 'POST' })
+    await handle.sync()
 
     writeFileSync(join(dataDir, 'hosts'), '')
-    const response = await handle('/sync', { method: 'POST' })
+    await handle.sync()
 
-    expect(await response.json()).toEqual({ hosts: [] })
+    expect(await health(handle)).toEqual({ syncing: false, hosts: [] })
     const thread = await handle('/threads/hive/thread-1')
     expect(thread.status).toBe(200)
   })
@@ -148,6 +153,11 @@ describe('POST /sync with the Host list file', () => {
       'a repeated hostname',
       'root@hive',
       'line 3: root@hive repeats the hostname hive',
+    ],
+    [
+      'a hostname repeated in another case',
+      'adwin@hivE',
+      'line 3: adwin@hivE repeats the hostname hive',
     ],
   ])('fails naming the line with %s', async (_, entry, error) => {
     const dataDir = createDataDir()
@@ -179,6 +189,7 @@ describe('the Sync cron job with a malformed Host list file', () => {
       new Error(`${join(dataDir, 'hosts')} line 1: hive must be user@host`),
     )
     expect(await health(handle)).toEqual({
+      syncing: false,
       hosts: [expect.objectContaining({ host: 'hive', lastError: null })],
     })
     expect((await handle('/threads/hive/thread-1')).status).toBe(200)

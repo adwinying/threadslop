@@ -1,5 +1,7 @@
-import type { syncAll } from '~/sync'
 import { Elysia } from 'elysia'
 
-export const syncRoutes = (sync: () => ReturnType<typeof syncAll>) =>
-  new Elysia().post('/sync', () => sync())
+/** Starts a Sync unless one is running, and answers without waiting for it. */
+export const syncRoutes = (startSync: () => boolean) =>
+  new Elysia().post('/sync', ({ status }) =>
+    status(202, { status: startSync() ? 'started' : 'running' }),
+  )

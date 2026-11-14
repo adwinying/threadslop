@@ -96,6 +96,11 @@ export const syncHost = async (
     skipped,
   } = signaturesSchema.parse(JSON.parse(await transport(host, 'signatures')))
   archive.recordHost(host.label, environmentId)
+  if (skipped > 0) {
+    console.warn(
+      `threadslop: ${host.label} skipped ${skipped} Thread${skipped === 1 ? '' : 's'} with an unsafe ID`,
+    )
+  }
 
   const stored = archive.signatures(host.label)
   const changed = reported.filter(
@@ -136,13 +141,6 @@ export const syncHost = async (
       }),
     )
   }
-
-  return {
-    host: host.label,
-    ok: true,
-    threadsPulled: live.length,
-    threadsSkipped: skipped,
-  }
 }
 
 /** Syncs every Host in turn. A failing Host is recorded and skipped. */
@@ -152,16 +150,13 @@ export const syncAll = async (
   hosts: Host[],
   clock: () => Date,
 ) => {
-  const results = []
   for (const host of hosts) {
     try {
-      results.push(await syncHost(archive, transport, host))
+      await syncHost(archive, transport, host)
       archive.recordSuccess(host.label, clock())
     } catch (cause) {
       const error = cause instanceof Error ? cause.message : String(cause)
       archive.recordFailure(host.label, error, clock())
-      results.push({ host: host.label, ok: false, error })
     }
   }
-  return { hosts: results }
 }

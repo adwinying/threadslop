@@ -101,6 +101,18 @@ describe('threadslop install-host', () => {
     expect(host.hostsFile().match(/adwin@hive/g)).toHaveLength(1)
   })
 
+  test('reads the hostname case-insensitively, so it matches the listed Host', async () => {
+    const host = setup()
+    mkdirSync(host.dataDir)
+    writeFileSync(join(host.dataDir, 'hosts'), 'adwin@hive\n')
+
+    const exitCode = await host.install('adwin@hivE')
+
+    expect(exitCode).toBe(0)
+    expect(host.sshArgs()).toContain('adwin@hive')
+    expect(host.hostsFile()).toBe('adwin@hive\n')
+  })
+
   test("replaces an earlier threadslop key's line, so an old key or command doesn't linger", async () => {
     const host = setup()
     const ssh = join(host.home, '.ssh')

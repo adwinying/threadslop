@@ -1,5 +1,5 @@
 import type { FakeHost } from '~/testing/fakeHost'
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { z } from 'zod'
 import { createFakeHost, createTestApp } from '~/testing/fakeHost'
 
@@ -66,13 +66,7 @@ describe('POST /sync', () => {
   test('a first Sync archives every Message so /search finds them', async () => {
     const response = await sync()
 
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({
-      hosts: [
-        { host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 0 },
-        { host: 'crefil', ok: true, threadsPulled: 1, threadsSkipped: 0 },
-      ],
-    })
+    expect(response.status).toBe(202)
     expect(await search('redirect loop')).toEqual([
       expect.objectContaining({ host: 'hive', threadId: 'thread-1' }),
     ])
@@ -93,14 +87,8 @@ describe('POST /sync again', () => {
     await sync()
     testApp.queries.length = 0
 
-    const response = await sync()
+    await sync()
 
-    expect(await response.json()).toEqual({
-      hosts: [
-        { host: 'hive', ok: true, threadsPulled: 0, threadsSkipped: 0 },
-        { host: 'crefil', ok: true, threadsPulled: 0, threadsSkipped: 0 },
-      ],
-    })
     expect(threadFetches()).toEqual([])
   })
 })
@@ -182,7 +170,8 @@ describe('POST /sync on a large Host', () => {
 })
 
 describe('POST /sync with an unsafe Thread ID', () => {
-  test('skips that Thread and syncs the rest of its Host', async () => {
+  test('skips that Thread, warns about it and syncs the rest of its Host', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
     hive.addThread({
       id: 'thread 2',
       title: 'Unsafe',
@@ -197,17 +186,15 @@ describe('POST /sync with an unsafe Thread ID', () => {
       updatedAt: '2026-11-01T00:00:01.000Z',
     })
 
-    const response = await sync()
+    await sync()
 
-    expect(await response.json()).toEqual({
-      hosts: [
-        { host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 1 },
-        { host: 'crefil', ok: true, threadsPulled: 1, threadsSkipped: 0 },
-      ],
-    })
     expect(await search('redirect loop')).toEqual([
       expect.objectContaining({ host: 'hive', threadId: 'thread-1' }),
     ])
     expect(await search('never fetched')).toEqual([])
+    expect(warn).toHaveBeenCalledWith(
+      'threadslop: hive skipped 1 Thread with an unsafe ID',
+    )
+    warn.mockRestore()
   })
 })

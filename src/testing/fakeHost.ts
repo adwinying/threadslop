@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { z } from 'zod'
 import { createApp } from '~/app'
 
 const queryScript = fileURLToPath(
@@ -266,7 +267,25 @@ export const createTestApp = ({
     root,
     queries,
     handle,
-    sync: () => handle('/sync', { method: 'POST' }),
+    /** Starts a Sync, or joins the running one, and waits until it's done. */
+    sync: async () => {
+      const response = await handle('/sync', { method: 'POST' })
+      await waitForSync(handle)
+      return response
+    },
+  }
+}
+
+const syncingSchema = z.object({ syncing: z.boolean() })
+
+/** Polls `/health` until no Sync is running. */
+export const waitForSync = async (
+  handle: (path: string) => Promise<Response>,
+) => {
+  const deadline = Date.now() + 5000
+  while (syncingSchema.parse(await (await handle('/health')).json()).syncing) {
+    if (Date.now() > deadline) throw new Error('Sync still running after 5s')
+    await Bun.sleep(2)
   }
 }
 
