@@ -1,4 +1,4 @@
-import type { Archive, ArchivedThread, Signature } from '~/archive'
+import type { Archive, Signature } from '~/archive'
 import type { Host, HostTransport } from '~/hosts'
 import { z } from 'zod'
 import { extractSearchText } from '~/extract'
@@ -76,7 +76,7 @@ const batchByItemCount = (changed: ReportedSignature[]) => {
 const toArchivedThread = (
   { items, ...thread }: z.infer<typeof threadsSchema>['threads'][number],
   signature: Signature,
-): ArchivedThread => ({
+) => ({
   ...thread,
   signature,
   items: items.map((item) => ({
@@ -112,8 +112,13 @@ export const syncHost = async (
   )
 
   const live = changed.filter(({ deleted }) => !deleted)
+  // One transaction per batch, not per Host: a first Sync of a large Host
+  // would be one huge transaction. Each Thread still commits atomically with
+  // its Signature, so an interrupted Sync re-pulls only what didn't land.
   for (const batch of batchByItemCount(live)) {
-    const signatures = new Map(batch.map(({ id, ...rest }) => [id, rest]))
+    const signatures = new Map(
+      batch.map(({ id, ...signature }) => [id, signature]),
+    )
     const { threads } = threadsSchema.parse(
       JSON.parse(
         await transport(
