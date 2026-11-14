@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type { ItemScope } from '~/itemScope'
-import { inScope } from '~/itemScope'
+import { inScopeSql, roleOf } from '~/itemScope'
 
 type HitRow = {
   host: string
@@ -27,14 +27,9 @@ const hitJoins = `
   JOIN threads t ON t.host = i.host AND t.thread_id = i.thread_id
   JOIN hosts h ON h.label = i.host`
 
-const roles: Record<string, string> = {
-  user_message: 'user',
-  assistant_message: 'assistant',
-}
-
 const toHit = ({ archived, ...row }: HitRow) => ({
   ...row,
-  role: roles[row.itemType] ?? null,
+  role: roleOf(row.itemType),
   archived: archived === 1,
   link: `t3-thread://v2/${row.environmentId}/${row.threadId}`,
 })
@@ -54,7 +49,7 @@ export const createSearch = (db: Database) => {
      JOIN items i ON i.id = items_fts.rowid
      ${hitJoins}
      WHERE items_fts MATCH $phrase
-       AND ${inScope}
+       AND ${inScopeSql}
        AND ($host IS NULL OR i.host = $host)
      ORDER BY bm25(items_fts)
      LIMIT $limit`,
@@ -77,7 +72,7 @@ export const createSearch = (db: Database) => {
            FROM items) i
      ${hitJoins}
      WHERE i.search_text LIKE $pattern ESCAPE '\\'
-       AND ${inScope}
+       AND ${inScopeSql}
        AND ($host IS NULL OR i.host = $host)
      ORDER BY i.created_at DESC
      LIMIT $limit`,

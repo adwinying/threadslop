@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type { ItemScope } from '~/itemScope'
-import { inScope } from '~/itemScope'
+import { inScopeSql, roleOf } from '~/itemScope'
 
 type Key = { host: string; threadId: string }
 
@@ -27,7 +27,6 @@ export const createThreadReader = (db: Database) => {
     {
       id: string
       type: string
-      role: 'user' | 'assistant' | null
       status: string
       ordinal: number
       createdAt: string
@@ -37,14 +36,11 @@ export const createThreadReader = (db: Database) => {
     },
     Key & { all: boolean }
   >(
-    `SELECT item_id AS id, type,
-            CASE type WHEN 'user_message' THEN 'user'
-                      WHEN 'assistant_message' THEN 'assistant' END AS role,
-            status, ordinal, created_at AS createdAt,
+    `SELECT item_id AS id, type, status, ordinal, created_at AS createdAt,
             completed_at AS completedAt, updated_at AS updatedAt,
             search_text AS text
      FROM items i
-     WHERE host = $host AND thread_id = $threadId AND ${inScope}
+     WHERE host = $host AND thread_id = $threadId AND ${inScopeSql}
      ORDER BY ordinal`,
   )
 
@@ -54,7 +50,9 @@ export const createThreadReader = (db: Database) => {
     return (
       thread && {
         thread,
-        items: itemsQuery.all({ host, threadId, all: scope === 'all' }),
+        items: itemsQuery
+          .all({ host, threadId, all: scope === 'all' })
+          .map((item) => ({ ...item, role: roleOf(item.type) })),
       }
     )
   }
