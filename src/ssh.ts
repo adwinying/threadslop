@@ -49,9 +49,14 @@ type SshTransportOptions = {
   ssh?: string
 }
 
+/** The Host's query script, authorized as the key's forced command. */
+export const queryCommand =
+  '~/.nix-profile/bin/node --disable-warning=ExperimentalWarning ~/.local/share/threadslop/query.mjs'
+
 /**
- * Runs query operations over ssh. The Host's forced command ignores the
- * requested command except as SSH_ORIGINAL_COMMAND (ADR 0001).
+ * Runs query operations over ssh. Requests the full query command, not just
+ * the operation, so Hosts behind Tailscale SSH, which ignores the forced
+ * command, run the query script too (ADR 0001).
  */
 export const createSshTransport =
   ({ dataDir, ssh = 'ssh' }: SshTransportOptions): HostTransport =>
@@ -81,7 +86,7 @@ export const createSshTransport =
         '-i',
         join(dataDir, identityFileName),
         host.destination,
-        operation,
+        `${queryCommand} ${operation}`,
       ],
       stdin,
     )

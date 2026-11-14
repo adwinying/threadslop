@@ -27,6 +27,26 @@ describe('Host query script', () => {
     },
   )
 
+  test('takes the operation from the end of the full query command sshd passes on', async () => {
+    const { stdout, exitCode } = await runQueryScript(
+      host.home,
+      '~/.nix-profile/bin/node --disable-warning=ExperimentalWarning ~/.local/share/threadslop/query.mjs signatures',
+    )
+
+    expect(exitCode).toBe(0)
+    expect(JSON.parse(stdout)).toHaveProperty('threads')
+  })
+
+  // Tailscale SSH ignores authorized_keys and runs the command as given.
+  test('takes the operation from its arguments when run without a forced command', async () => {
+    const { stdout, exitCode } = await runQueryScript(host.home, '', '', [
+      'signatures',
+    ])
+
+    expect(exitCode).toBe(0)
+    expect(JSON.parse(stdout)).toHaveProperty('threads')
+  })
+
   test.each([
     ['not JSON', 'thread-1'],
     ['not an array', '"thread-1"'],

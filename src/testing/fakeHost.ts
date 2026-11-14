@@ -205,14 +205,15 @@ export const runQueryScript = async (
   home: string,
   operation: string,
   stdin = '',
+  args: string[] = [],
 ) => {
   const child = Bun.spawn(
-    ['node', '--disable-warning=ExperimentalWarning', queryScript],
+    ['node', '--disable-warning=ExperimentalWarning', queryScript, ...args],
     {
       env: {
         PATH: process.env.PATH,
         HOME: home,
-        SSH_ORIGINAL_COMMAND: operation,
+        ...(operation === '' ? {} : { SSH_ORIGINAL_COMMAND: operation }),
       },
       stdin: new TextEncoder().encode(stdin),
       stdout: 'pipe',
