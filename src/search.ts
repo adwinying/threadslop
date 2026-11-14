@@ -1,4 +1,6 @@
 import type { Database } from 'bun:sqlite'
+import type { ItemScope } from '~/itemScope'
+import { inScope } from '~/itemScope'
 
 type HitRow = {
   host: string
@@ -12,9 +14,9 @@ type HitRow = {
   archived: number
 }
 
-type Filters = { host: string | null; limit: number }
+type Filters = { host: string | null; all: boolean; limit: number }
 
-export type SearchOptions = { host?: string; limit: number }
+export type SearchOptions = { host?: string; items: ItemScope; limit: number }
 
 const hitColumns = `
   i.host, h.environment_id AS environmentId, i.thread_id AS threadId,
@@ -45,14 +47,14 @@ const toPattern = (query: string) =>
   `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
 
 export const createSearch = (db: Database) => {
-  const messagesQuery = db.query<HitRow, { phrase: string } & Filters>(
+  const itemsQuery = db.query<HitRow, { phrase: string } & Filters>(
     `SELECT ${hitColumns},
             snippet(items_fts, 0, '«', '»', '…', 32) AS snippet
      FROM items_fts
      JOIN items i ON i.id = items_fts.rowid
      ${hitJoins}
      WHERE items_fts MATCH $phrase
-       AND i.type IN ('user_message', 'assistant_message')
+       AND ${inScope}
        AND ($host IS NULL OR i.host = $host)
      ORDER BY bm25(items_fts)
      LIMIT $limit`,
@@ -60,7 +62,7 @@ export const createSearch = (db: Database) => {
 
   // The trigram index can't match under 3 characters, so short queries scan
   // the content table. LIKE and lower() both fold ASCII case only.
-  const shortMessagesQuery = db.query<
+  const shortItemsQuery = db.query<
     HitRow,
     { pattern: string; query: string } & Filters
   >(
@@ -75,22 +77,22 @@ export const createSearch = (db: Database) => {
            FROM items) i
      ${hitJoins}
      WHERE i.search_text LIKE $pattern ESCAPE '\\'
-       AND i.type IN ('user_message', 'assistant_message')
+       AND ${inScope}
        AND ($host IS NULL OR i.host = $host)
      ORDER BY i.created_at DESC
      LIMIT $limit`,
   )
 
-  return (query: string, { host, limit }: SearchOptions) => {
-    const filters = { host: host ?? null, limit }
+  return (query: string, { host, items, limit }: SearchOptions) => {
+    const filters = { host: host ?? null, all: items === 'all', limit }
     return (
       [...query].length < 3
-        ? shortMessagesQuery.all({
+        ? shortItemsQuery.all({
             pattern: toPattern(query),
             query,
             ...filters,
           })
-        : messagesQuery.all({ phrase: toPhrase(query), ...filters })
+        : itemsQuery.all({ phrase: toPhrase(query), ...filters })
     ).map(toHit)
   }
 }

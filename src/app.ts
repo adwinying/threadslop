@@ -4,8 +4,10 @@ import { Elysia } from 'elysia'
 import { createArchive, migrate } from '~/archive'
 import { searchRoutes } from '~/routes/search'
 import { syncRoutes } from '~/routes/sync'
+import { threadRoutes } from '~/routes/threads'
 import { createSearch } from '~/search'
 import { syncAll } from '~/sync'
+import { createThreadReader } from '~/threads'
 
 export type QueryOperation = 'signatures' | 'threads'
 
@@ -32,4 +34,5 @@ export const createApp = ({ database, hosts, transport }: AppCollaborators) => {
     .get('/health', () => 'ok')
     .use(syncRoutes(() => syncAll(archive, transport, hosts)))
     .use(searchRoutes(createSearch(database)))
+    .use(threadRoutes(createThreadReader(database)))
 }

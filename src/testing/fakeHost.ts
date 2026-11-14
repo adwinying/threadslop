@@ -43,6 +43,15 @@ type MessageFixture = {
   updatedAt: string
 }
 
+type ItemFixture = {
+  id: string
+  threadId: string
+  ordinal: number
+  type: string
+  updatedAt: string
+  [field: string]: unknown
+}
+
 const messagePayload = ({ role, ...message }: MessageFixture) =>
   JSON.stringify({
     ...message,
@@ -98,6 +107,40 @@ export const createFakeHost = (root: string, label: string) => {
         type: `${message.role}_message`,
         updatedAt: message.updatedAt,
         payload: messagePayload(message),
+      })
+    },
+    /** Adds an Item of any type; extra fields go into its payload. */
+    addItem: ({
+      id,
+      threadId,
+      ordinal,
+      type,
+      updatedAt,
+      ...fields
+    }: ItemFixture) => {
+      db.query(
+        `INSERT INTO orchestration_v2_projection_turn_items
+          (turn_item_id, thread_id, ordinal, type, status, updated_at,
+           payload_json)
+         VALUES ($id, $threadId, $ordinal, $type, 'completed', $updatedAt,
+           $payload)`,
+      ).run({
+        id,
+        threadId,
+        ordinal,
+        type,
+        updatedAt,
+        payload: JSON.stringify({
+          id,
+          threadId,
+          ordinal,
+          type,
+          status: 'completed',
+          startedAt: updatedAt,
+          completedAt: updatedAt,
+          updatedAt,
+          ...fields,
+        }),
       })
     },
     editMessage: (message: MessageFixture) => {
