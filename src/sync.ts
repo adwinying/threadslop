@@ -1,6 +1,5 @@
-import type { HostTransport } from '~/app'
 import type { Archive, ArchivedThread, Signature } from '~/archive'
-import type { Host } from '~/hosts'
+import type { Host, HostTransport } from '~/hosts'
 import { z } from 'zod'
 import { extractSearchText } from '~/extract'
 

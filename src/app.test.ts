@@ -1,4 +1,4 @@
-import type { HostTransport } from '~/app'
+import type { HostTransport } from '~/hosts'
 import { Database } from 'bun:sqlite'
 import { describe, expect, test } from 'bun:test'
 import { createApp } from '~/app'

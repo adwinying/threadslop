@@ -1,4 +1,4 @@
-import type { HostTransport, QueryOperation } from '~/app'
+import type { HostTransport, QueryOperation } from '~/hosts'
 import { Database } from 'bun:sqlite'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

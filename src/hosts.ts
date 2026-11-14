@@ -24,3 +24,12 @@ export const hostListSchema = z
   )
 
 export type Host = z.infer<typeof hostSchema>
+
+export type QueryOperation = 'signatures' | 'threads'
+
+/** Runs a query operation on a Host and resolves with its stdout. */
+export type HostTransport = (
+  host: Host,
+  operation: QueryOperation,
+  stdin?: string,
+) => Promise<string>

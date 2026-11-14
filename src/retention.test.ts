@@ -1,4 +1,4 @@
-import type { QueryOperation } from '~/app'
+import type { QueryOperation } from '~/hosts'
 import type { FakeHost } from '~/testing/fakeHost'
 import { Database } from 'bun:sqlite'
 import { beforeEach, describe, expect, test } from 'bun:test'

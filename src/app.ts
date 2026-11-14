@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite'
-import type { Host } from '~/hosts'
+import type { Host, HostTransport } from '~/hosts'
 import { cron } from '@elysiajs/cron'
 import { Elysia } from 'elysia'
 import { createArchive, migrate } from '~/archive'
@@ -14,15 +14,6 @@ import { createThreadReader } from '~/threads'
 const logFailure = (job: string) => (error: unknown) => {
   console.error(`${job} failed:`, error)
 }
-
-export type QueryOperation = 'signatures' | 'threads'
-
-/** Runs a query operation on a Host and resolves with its stdout. */
-export type HostTransport = (
-  host: Host,
-  operation: QueryOperation,
-  stdin?: string,
-) => Promise<string>
 
 export type AppCollaborators = {
   /** Opened with `{ strict: true }`, so queries bind `$name` params by name. */
