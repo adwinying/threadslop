@@ -1,9 +1,16 @@
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
+import { join } from 'node:path'
 import { z } from 'zod'
 
 // No leading dash in either part, so ssh never reads an entry as an option.
 const destinationPattern = /^[\w.][\w.-]*@[a-z\d][a-z\d.-]*$/i
 
-const hostSchema = z
+export const hostSchema = z
   .string()
   .regex(destinationPattern, 'must be user@host')
   .transform((destination) => ({
@@ -12,17 +19,47 @@ const hostSchema = z
     destination,
   }))
 
-/** A comma-separated list of `user@host` entries. */
-export const hostListSchema = z
-  .string()
-  .transform((value) => value.split(',').map((entry) => entry.trim()))
-  .pipe(z.array(hostSchema))
-  .refine(
-    (hosts) => new Set(hosts.map(({ label }) => label)).size === hosts.length,
-    'hostnames must be unique',
-  )
-
 export type Host = z.infer<typeof hostSchema>
+
+/** The Host list in the data directory, re-read by every Sync. */
+export const hostsFile = (dataDir: string) => join(dataDir, 'hosts')
+
+const header = `# Hosts threadslop syncs, one user@host per line. Edits apply on the next Sync.
+# Add a Host with: docker exec -it threadslop threadslop install-host <user@host>
+`
+
+export const ensureHostsFile = (dataDir: string) => {
+  if (!existsSync(hostsFile(dataDir))) {
+    writeFileSync(hostsFile(dataDir), header)
+  }
+}
+
+/** Reads the Host list. Throws naming the first malformed line. */
+export const readHosts = (dataDir: string) => {
+  const file = hostsFile(dataDir)
+  const hosts: Host[] = []
+  const lines = readFileSync(file, 'utf8').split('\n')
+  for (const [index, line] of lines.entries()) {
+    const entry = line.replace(/#.*/, '').trim()
+    if (entry === '') continue
+    const invalid = (reason: string) =>
+      new Error(`${file} line ${index + 1}: ${entry} ${reason}`)
+    const host = hostSchema.safeParse(entry)
+    if (!host.success) throw invalid('must be user@host')
+    if (hosts.some(({ label }) => label === host.data.label)) {
+      throw invalid(`repeats the hostname ${host.data.label}`)
+    }
+    hosts.push(host.data)
+  }
+  return hosts
+}
+
+/** Appends a Host on a line of its own. */
+export const appendHost = (dataDir: string, { destination }: Host) => {
+  const content = readFileSync(hostsFile(dataDir), 'utf8')
+  const separator = content === '' || content.endsWith('\n') ? '' : '\n'
+  appendFileSync(hostsFile(dataDir), `${separator}${destination}\n`)
+}
 
 export type QueryOperation = 'signatures' | 'threads'
 

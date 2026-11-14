@@ -254,7 +254,8 @@ export const createTestApp = ({
     clock: () => testNow,
     pauseCrons: true,
     ...collaborators,
-    hosts: hosts.map((label) => ({ label, destination: `adwin@${label}` })),
+    hosts: () =>
+      hosts.map((label) => ({ label, destination: `adwin@${label}` })),
   })
   const handle = (path: string, init?: RequestInit) =>
     app.handle(new Request(`http://localhost${path}`, init))

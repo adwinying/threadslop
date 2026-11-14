@@ -2,6 +2,8 @@
 
 The container on nas pulls from each Host over plain SSH on the tailnet. Its key is authorized on each Host with `restrict,command=` pointing at a small read-only query script installed on that Host. That gives nas only the fixed queries, never a shell.
 
+Hosts are installed from inside the container with `threadslop install-host <user@host>`. It logs in with the Host's password, typed once at the tty and never stored, with public-key auth off: once threadslop's key is authorized, its forced command would swallow the install script. The Host list lives in the data directory next to the key, and every Sync re-reads it, so adding a Host needs no restart.
+
 ## Considered Options
 
 - **Push from each Host:** needs a timer and sync state on every Host, which spreads logic across machines.

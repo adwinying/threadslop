@@ -1,8 +1,20 @@
-// `bun run install-host <user@host>`: authorizes threadslop's key on a Host
-// for the query script only (ADR 0001). Run it from a machine that can already
-// ssh to the Host, never from inside the container.
-import { fileURLToPath } from 'node:url'
-import { hostListSchema } from '~/hosts'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+// `threadslop install-host <user@host>`, run in the container with
+// `docker exec -it`: logs in to the Host with its password once, authorizes
+// threadslop's key there for the query script only (ADR 0001), then adds the
+// Host to the Host list.
+// oxlint-disable-next-line import/default -- a text import, typed by query.d.mts
+import hostQueryScript from '~/../host/query.mjs' with { type: 'text' }
+import { createEnvironment } from '~/env'
+import {
+  appendHost,
+  ensureHostsFile,
+  hostSchema,
+  hostsFile,
+  readHosts,
+} from '~/hosts'
+import { ensureSshKey } from '~/ssh'
 
 const publicKeyPattern = /^ssh-ed25519 ([A-Za-z0-9+/]+={0,2}) [\w.@-]+$/
 
@@ -49,31 +61,70 @@ echo 'threadslop: key authorized, query script installed'
 `
 }
 
-const main = async () => {
-  const hosts = hostListSchema.safeParse(Bun.argv[2] ?? '')
-  if (!hosts.success || hosts.data.length !== 1) {
-    console.error('Usage: bun run install-host <user@host>')
-    process.exit(1)
-  }
-  const serviceUrl = process.env.THREADSLOP_URL ?? 'http://nas:3005'
-
-  const response = await fetch(new URL('/pubkey', serviceUrl))
-  if (!response.ok) {
-    throw new Error(`GET ${response.url} responded ${response.status}`)
-  }
-  const script = installScript({
-    publicKey: (await response.text()).trim(),
-    queryScript: await Bun.file(
-      fileURLToPath(new URL('../host/query.mjs', import.meta.url)),
-    ).text(),
-  })
-
-  const ssh = Bun.spawn(['ssh', hosts.data[0].destination, 'sh -s'], {
-    stdin: new TextEncoder().encode(script),
-    stdout: 'inherit',
-    stderr: 'inherit',
-  })
-  process.exit(await ssh.exited)
+type InstallHostOptions = {
+  env?: Record<string, string | undefined>
+  /** The ssh binary. Tests swap in a stand-in. */
+  ssh?: string
 }
 
-if (import.meta.main) await main()
+/** Runs the command with its arguments and resolves with its exit code. */
+export const installHost = async (
+  args: string[],
+  { env = process.env, ssh = 'ssh' }: InstallHostOptions = {},
+) => {
+  const host = hostSchema.safeParse(args.length === 1 ? args[0] : undefined)
+  if (!host.success) {
+    console.error('Usage: threadslop install-host <user@host>')
+    return 1
+  }
+  const dataDir = createEnvironment(env).DATA_DIR
+  mkdirSync(dataDir, { recursive: true })
+  const { publicKey } = await ensureSshKey(dataDir)
+  ensureHostsFile(dataDir)
+
+  const listed = readHosts(dataDir).find(
+    ({ label }) => label === host.data.label,
+  )
+  if (listed !== undefined && listed.destination !== host.data.destination) {
+    console.error(
+      `threadslop: ${listed.label} is already listed as ${listed.destination} in ${hostsFile(dataDir)}`,
+    )
+    return 1
+  }
+
+  const child = Bun.spawn(
+    [
+      ssh,
+      '-F',
+      '/dev/null',
+      // threadslop's own key, once authorized, would hit the forced command
+      // instead of running this script, so log in with the password.
+      '-o',
+      'PubkeyAuthentication=no',
+      '-o',
+      'StrictHostKeyChecking=accept-new',
+      '-o',
+      `UserKnownHostsFile=${join(dataDir, 'known_hosts')}`,
+      host.data.destination,
+      'sh -s',
+    ],
+    {
+      // ssh reads the password from the tty, so stdin carries the script.
+      stdin: new TextEncoder().encode(
+        installScript({ publicKey, queryScript: hostQueryScript }),
+      ),
+      stdout: 'inherit',
+      stderr: 'inherit',
+    },
+  )
+  const exitCode = await child.exited
+  if (exitCode !== 0) return exitCode
+
+  if (listed === undefined) {
+    appendHost(dataDir, host.data)
+    console.log(
+      `threadslop: listed ${host.data.destination}, the next Sync pulls it`,
+    )
+  }
+  return 0
+}
