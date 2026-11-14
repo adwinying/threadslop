@@ -358,11 +358,8 @@ describe('POST /sync with unexpected Item payloads', () => {
       payload: 'not JSON at all',
     })
 
-    const response = await sync()
+    await sync()
 
-    expect(await response.json()).toEqual({
-      hosts: [{ host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 0 }],
-    })
     const thread = await get('/threads/hive/thread-1')
     const { items } = z
       .object({ items: z.array(z.unknown()) })

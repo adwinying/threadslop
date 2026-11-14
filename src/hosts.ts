@@ -13,11 +13,16 @@ const destinationPattern = /^[\w.][\w.-]*@[a-z\d][a-z\d.-]*$/i
 export const hostSchema = z
   .string()
   .regex(destinationPattern, 'must be user@host')
-  .transform((destination) => ({
-    /** The hostname part, which identifies the Host in the archive. */
-    label: destination.slice(destination.indexOf('@') + 1),
-    destination,
-  }))
+  .transform((entry) => {
+    const at = entry.indexOf('@')
+    // Hostnames are case-insensitive, so `hivE` names the same Host as `hive`.
+    const label = entry.slice(at + 1).toLowerCase()
+    return {
+      /** The lowercased hostname part, which identifies the Host in the archive. */
+      label,
+      destination: `${entry.slice(0, at)}@${label}`,
+    }
+  })
 
 export type Host = z.infer<typeof hostSchema>
 

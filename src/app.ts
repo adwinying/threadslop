@@ -40,21 +40,27 @@ export const createApp = ({
   migrate(database)
   const archive = createArchive(database)
 
-  // Syncs never overlap: callers arriving mid-Sync share its result.
-  let running: ReturnType<typeof syncAll> | undefined
-  const sync = () =>
-    (running ??= Promise.try(() =>
-      syncAll(archive, transport, hosts(), clock),
-    ).finally(() => {
-      running = undefined
-    }))
+  // Syncs never overlap: callers arriving mid-Sync join it. A Sync never
+  // rejects; its failure is logged here and per-Host results land in /health.
+  let running: Promise<void> | undefined
+  const sync = () => {
+    if (running !== undefined) return { started: false, done: running }
+    // Read up front, so POST /sync answers a malformed Host list with its error.
+    const listed = hosts()
+    running = syncAll(archive, transport, listed, clock)
+      .catch(logFailure('Sync'))
+      .finally(() => {
+        running = undefined
+      })
+    return { started: true, done: running }
+  }
 
   return new Elysia()
     .use(
       cron({
         name: 'sync',
         pattern: '*/5 * * * *',
-        run: sync,
+        run: () => sync().done,
         paused: pauseCrons,
         catch: logFailure('Sync'),
       }),
@@ -71,8 +77,13 @@ export const createApp = ({
         catch: logFailure('Snapshot'),
       }),
     )
-    .use(healthRoutes(() => archive.health(hosts().map(({ label }) => label))))
-    .use(syncRoutes(sync))
+    .use(
+      healthRoutes(() => ({
+        syncing: running !== undefined,
+        hosts: archive.health(hosts().map(({ label }) => label)),
+      })),
+    )
+    .use(syncRoutes(() => sync().started))
     .use(searchRoutes(createSearch(database)))
     .use(threadRoutes(createThreadReader(database)))
 }

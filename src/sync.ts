@@ -13,7 +13,6 @@ const signaturesSchema = z.object({
       deleted: z.boolean(),
     }),
   ),
-  skipped: z.number(),
 })
 
 const threadsSchema = z.object({
@@ -90,11 +89,9 @@ export const syncHost = async (
   transport: HostTransport,
   host: Host,
 ) => {
-  const {
-    environmentId,
-    threads: reported,
-    skipped,
-  } = signaturesSchema.parse(JSON.parse(await transport(host, 'signatures')))
+  const { environmentId, threads: reported } = signaturesSchema.parse(
+    JSON.parse(await transport(host, 'signatures')),
+  )
   archive.recordHost(host.label, environmentId)
 
   const stored = archive.signatures(host.label)
@@ -136,13 +133,6 @@ export const syncHost = async (
       }),
     )
   }
-
-  return {
-    host: host.label,
-    ok: true,
-    threadsPulled: live.length,
-    threadsSkipped: skipped,
-  }
 }
 
 /** Syncs every Host in turn. A failing Host is recorded and skipped. */
@@ -152,16 +142,13 @@ export const syncAll = async (
   hosts: Host[],
   clock: () => Date,
 ) => {
-  const results = []
   for (const host of hosts) {
     try {
-      results.push(await syncHost(archive, transport, host))
+      await syncHost(archive, transport, host)
       archive.recordSuccess(host.label, clock())
     } catch (cause) {
       const error = cause instanceof Error ? cause.message : String(cause)
       archive.recordFailure(host.label, error, clock())
-      results.push({ host: host.label, ok: false, error })
     }
   }
-  return { hosts: results }
 }

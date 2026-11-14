@@ -66,13 +66,7 @@ describe('POST /sync', () => {
   test('a first Sync archives every Message so /search finds them', async () => {
     const response = await sync()
 
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({
-      hosts: [
-        { host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 0 },
-        { host: 'crefil', ok: true, threadsPulled: 1, threadsSkipped: 0 },
-      ],
-    })
+    expect(response.status).toBe(202)
     expect(await search('redirect loop')).toEqual([
       expect.objectContaining({ host: 'hive', threadId: 'thread-1' }),
     ])
@@ -93,14 +87,8 @@ describe('POST /sync again', () => {
     await sync()
     testApp.queries.length = 0
 
-    const response = await sync()
+    await sync()
 
-    expect(await response.json()).toEqual({
-      hosts: [
-        { host: 'hive', ok: true, threadsPulled: 0, threadsSkipped: 0 },
-        { host: 'crefil', ok: true, threadsPulled: 0, threadsSkipped: 0 },
-      ],
-    })
     expect(threadFetches()).toEqual([])
   })
 })
@@ -197,14 +185,8 @@ describe('POST /sync with an unsafe Thread ID', () => {
       updatedAt: '2026-11-01T00:00:01.000Z',
     })
 
-    const response = await sync()
+    await sync()
 
-    expect(await response.json()).toEqual({
-      hosts: [
-        { host: 'hive', ok: true, threadsPulled: 1, threadsSkipped: 1 },
-        { host: 'crefil', ok: true, threadsPulled: 1, threadsSkipped: 0 },
-      ],
-    })
     expect(await search('redirect loop')).toEqual([
       expect.objectContaining({ host: 'hive', threadId: 'thread-1' }),
     ])
