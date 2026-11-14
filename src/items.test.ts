@@ -295,6 +295,23 @@ describe('GET /threads/:host/:threadId', () => {
     )
   })
 
+  test('finds a Thread whose ID has % and : when sent URI-encoded', async () => {
+    const id = 'mcp:launch:50%25:100%'
+    hive.addThread({
+      id,
+      title: 'Percent signs',
+      updatedAt: '2026-11-03T00:00:00.000Z',
+    })
+    await sync()
+
+    const response = await getThread('hive', id)
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ thread: expect.objectContaining({ id }) }),
+    )
+  })
+
   test('responds 404 for an unknown Thread', async () => {
     await sync()
 
