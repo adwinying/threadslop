@@ -17,13 +17,11 @@ const listen: Listen = (app, port) => {
 export type StartOptions = {
   env?: Record<string, string | undefined>
   listen?: Listen
-  port?: number
 }
 
 export const start = async ({
   env = process.env,
   listen: startListening = listen,
-  port = 3000,
 }: StartOptions = {}) => {
   const config = createEnvironment(env)
   mkdirSync(config.DATA_DIR, { recursive: true })
@@ -40,7 +38,7 @@ export const start = async ({
     clock: () => new Date(),
   }).use(pubkeyRoutes(publicKey))
 
-  startListening(app, port)
+  startListening(app, 3000)
 
   return { app }
 }

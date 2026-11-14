@@ -40,7 +40,7 @@ export const ensureSshKey = async (dataDir: string) => {
     ])
   }
   const publicKey = (await readFile(`${identityFile}.pub`, 'utf8')).trim()
-  return { identityFile, publicKey }
+  return { publicKey }
 }
 
 type SshTransportOptions = {

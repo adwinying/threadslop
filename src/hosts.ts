@@ -9,7 +9,6 @@ const hostSchema = z
   .transform((destination) => ({
     /** The hostname part, which identifies the Host in the archive. */
     label: destination.slice(destination.indexOf('@') + 1),
-    /** The `user@host` ssh destination. */
     destination,
   }))
 
