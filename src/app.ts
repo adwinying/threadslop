@@ -3,6 +3,7 @@ import type { Host, HostTransport } from '~/hosts'
 import { cron } from '@elysiajs/cron'
 import { Elysia } from 'elysia'
 import { createArchive, migrate } from '~/archive'
+import { healthRoutes } from '~/routes/health'
 import { searchRoutes } from '~/routes/search'
 import { syncRoutes } from '~/routes/sync'
 import { threadRoutes } from '~/routes/threads'
@@ -68,7 +69,7 @@ export const createApp = ({
         catch: logFailure('Snapshot'),
       }),
     )
-    .get('/health', () => ({ hosts: archive.health(labels) }))
+    .use(healthRoutes(() => archive.health(labels)))
     .use(syncRoutes(sync))
     .use(searchRoutes(createSearch(database)))
     .use(threadRoutes(createThreadReader(database)))
