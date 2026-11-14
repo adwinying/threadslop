@@ -9,6 +9,8 @@ RUN bun install --frozen-lockfile
 
 COPY tsconfig.json ./
 COPY src/ src/
+# Bundled into the binary for install-host.
+COPY host/ host/
 
 ARG TARGETARCH
 RUN case "$TARGETARCH" in \

@@ -63,12 +63,11 @@ jobs:
           platforms: linux/amd64
           tags: threadslop:verify
 
-      # host.invalid never resolves, so a Sync tick can't reach a real Host.
+      # A fresh data directory lists no Hosts, so a Sync tick reaches none.
       - name: Start amd64 image
         run: >-
           docker run --detach --rm --name threadslop-verify
           --publish 127.0.0.1:3000:3000
-          --env HOSTS=threadslop@host.invalid
           threadslop:verify
 
       - name: Wait for container
@@ -86,6 +85,7 @@ jobs:
         run: |
           test "$(docker exec threadslop-verify id -u)" = 10001
           docker exec threadslop-verify test -f /data/id_ed25519
+          docker exec threadslop-verify test -f /data/hosts
           curl --silent --fail http://127.0.0.1:3000/pubkey | grep --quiet '^ssh-ed25519 .* threadslop@nas$'
 
       - name: Stop verification container

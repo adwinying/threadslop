@@ -7,8 +7,7 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --type-aware --deny-warnings && oxfmt --check",
-    "format": "oxfmt",
-    "install-host": "bun run src/installHost.ts"
+    "format": "oxfmt"
   },
   "dependencies": {
     "@elysiajs/cron": "^1.4.2",

@@ -21,7 +21,8 @@ export type AppCollaborators = {
   database: Database
   /** Where the Snapshot is written. */
   dataDir: string
-  hosts: Host[]
+  /** Read at the start of every Sync and `/health`; throws if invalid. */
+  hosts: () => Host[]
   transport: HostTransport
   clock: () => Date
   /** Registers the cron jobs without letting them fire; tests trigger them. */
@@ -38,12 +39,13 @@ export const createApp = ({
 }: AppCollaborators) => {
   migrate(database)
   const archive = createArchive(database)
-  const labels = hosts.map(({ label }) => label)
 
   // Syncs never overlap: callers arriving mid-Sync share its result.
   let running: ReturnType<typeof syncAll> | undefined
   const sync = () =>
-    (running ??= syncAll(archive, transport, hosts, clock).finally(() => {
+    (running ??= Promise.try(() =>
+      syncAll(archive, transport, hosts(), clock),
+    ).finally(() => {
       running = undefined
     }))
 
@@ -69,7 +71,7 @@ export const createApp = ({
         catch: logFailure('Snapshot'),
       }),
     )
-    .use(healthRoutes(() => archive.health(labels)))
+    .use(healthRoutes(() => archive.health(hosts().map(({ label }) => label))))
     .use(syncRoutes(sync))
     .use(searchRoutes(createSearch(database)))
     .use(threadRoutes(createThreadReader(database)))
