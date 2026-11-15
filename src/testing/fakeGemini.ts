@@ -170,6 +170,7 @@ export const createFakeGemini = () => {
   let appPageStatus: number | undefined
   let answersBeforeThrottle = Infinity
   let refusingRotations = false
+  let rejectionCode: number | undefined
 
   const hasSessionCookies = (header: string) =>
     [...accepted].every(([name, value]) =>
@@ -264,6 +265,14 @@ export const createFakeGemini = () => {
       }
       const parsed: unknown = JSON.parse(payload)
       requests.push({ rpc, payload: parsed })
+      if (rejectionCode !== undefined) {
+        return respond(
+          chunked([
+            ['wrb.fr', rpc, null, null, null, [rejectionCode], 'generic'],
+            ...throttledFrames,
+          ]),
+        )
+      }
       return respond(
         chunked(
           answersBeforeThrottle-- <= 0
@@ -326,6 +335,10 @@ export const createFakeGemini = () => {
      */
     throttle: (answered = 0) => {
       answersBeforeThrottle = answered
+    },
+    /** Refuses every rpc with batchexecute's error frame carrying `code`. */
+    rejectRpcs: (code: number) => {
+      rejectionCode = code
     },
   }
 }

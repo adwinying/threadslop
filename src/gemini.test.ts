@@ -617,6 +617,19 @@ describe('POST /sync when Gemini fails', () => {
     })
   })
 
+  test("records Google's error frame when it refuses an rpc", async () => {
+    gemini.rejectRpcs(7)
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({
+        lastError:
+          'Gemini answered MaZiqc without a result: ["wrb.fr","MaZiqc",null,null,null,[7],"generic"]',
+      }),
+    )
+  })
+
   test('fails a chat with more turns than one read returns, saving none of it', async () => {
     gemini.putChat({
       id: '5e6f708192031425',

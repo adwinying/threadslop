@@ -205,7 +205,7 @@ const parseLine = (line: string): unknown => {
   }
 }
 
-/** Finds the rpc's result in a batchexecute response; none means throttled. */
+/** Finds the rpc's result in a batchexecute response. */
 const resultOf = (text: string, rpc: string): unknown => {
   // With `rt=c` each line of frames follows a line holding its length.
   const frames = text
@@ -216,11 +216,17 @@ const resultOf = (text: string, rpc: string): unknown => {
     (frame) => pick(frame, 0) === 'wrb.fr' && pick(frame, 1) === rpc,
   )
   const body = pick(result, 2)
-  // Never read as an empty answer: that would wipe archived Items.
-  if (typeof body !== 'string') {
-    throw new Error(`Gemini answered ${rpc} without a result; throttled?`)
-  }
-  return JSON.parse(body)
+  if (typeof body === 'string') return JSON.parse(body)
+  // Never read as an empty answer: that would wipe archived Items. Every
+  // response carries `di` and `af.httprm` frames; any other says what failed.
+  const unusual = frames.filter(
+    (frame) => !['di', 'af.httprm'].includes(String(pick(frame, 0))),
+  )
+  throw new Error(
+    unusual.length > 0
+      ? `Gemini answered ${rpc} without a result: ${unusual.map((frame) => JSON.stringify(frame)).join(' ')}`
+      : `Gemini answered ${rpc} without a result; throttled?`,
+  )
 }
 
 const tokenIn = (page: string, key: string) =>
