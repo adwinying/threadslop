@@ -1,6 +1,6 @@
 import type { AnyElysia } from 'elysia'
-import type { Fetch } from '~/gemini'
 import type { HostTransport } from '~/hosts'
+import type { Fetch } from '~/web'
 import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'

@@ -1,4 +1,4 @@
-import type { Fetch } from '~/gemini'
+import type { Fetch } from '~/web'
 import { z } from 'zod'
 import { saveGeminiSession } from '~/gemini'
 

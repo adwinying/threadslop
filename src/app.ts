@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
-import type { Fetch } from '~/gemini'
 import type { Host, HostTransport } from '~/hosts'
+import type { Fetch } from '~/web'
 import { cron } from '@elysiajs/cron'
 import { Elysia } from 'elysia'
 import { createArchive, migrate } from '~/archive'

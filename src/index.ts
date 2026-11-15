@@ -1,3 +1,4 @@
+import { installChatGPT } from '~/installChatGPT'
 import { installGemini } from '~/installGemini'
 import { installHost } from '~/installHost'
 import { start } from '~/start'
@@ -10,7 +11,11 @@ if (command === undefined) {
   process.exit(await installHost(args))
 } else if (command === 'install-gemini') {
   process.exit(await installGemini(args))
+} else if (command === 'install-chatgpt') {
+  process.exit(await installChatGPT(args))
 } else {
-  console.error('Usage: threadslop [install-host <user@host> | install-gemini]')
+  console.error(
+    'Usage: threadslop [install-host <user@host> | install-gemini | install-chatgpt]',
+  )
   process.exit(1)
 }
