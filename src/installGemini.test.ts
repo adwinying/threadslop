@@ -123,6 +123,19 @@ describe('threadslop install-gemini', () => {
     expect(session()).toBe(stored)
   })
 
+  test('names the status when Gemini fails the check, rather than blaming the cookies', async () => {
+    const { gemini, testApp, session, install } = setup()
+    gemini.storeSession(testApp.root)
+    const stored = session()
+    gemini.failAppPage(503)
+
+    expect(await install(['fake-psid\r', 'fake-psidts\r']).exitCode).toBe(1)
+    expect(error).toHaveBeenCalledWith(
+      'threadslop: Gemini answered the app page with HTTP 503',
+    )
+    expect(session()).toBe(stored)
+  })
+
   test('refuses to prompt without a tty, where the cookies would echo', async () => {
     const { gemini, testApp, session, install } = setup()
     gemini.storeSession(testApp.root)

@@ -167,6 +167,7 @@ export const createFakeGemini = () => {
   let unsent: [name: string, value: string][] = []
   let rotations = 0
   let signedIn = true
+  let appPageStatus: number | undefined
   let answersBeforeThrottle = Infinity
   let refusingRotations = false
 
@@ -222,6 +223,9 @@ export const createFakeGemini = () => {
     const authorized = signedIn && hasSessionCookies(cookieHeader)
 
     if (origin === 'https://gemini.google.com' && pathname === '/app') {
+      if (appPageStatus !== undefined) {
+        return respond(null, { status: appPageStatus })
+      }
       return authorized
         ? respond(signedInPage)
         : respond(null, {
@@ -311,6 +315,10 @@ export const createFakeGemini = () => {
     /** Ends the session, as Google does when it signs the cookies out. */
     signOut: () => {
       signedIn = false
+    },
+    /** Answers the app page with `status`, as Google does when down or busy. */
+    failAppPage: (status: number) => {
+      appPageStatus = status
     },
     /**
      * Answers every rpc after the next `answered` without a result frame, as

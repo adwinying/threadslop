@@ -257,9 +257,18 @@ const createRequest =
     return response
   }
 
-/** Loads the web app for its session tokens; none means signed out. */
+/**
+ * Loads the web app for its session tokens. Resolves with undefined when
+ * signed out: Google redirects to sign-in or serves a page without the tokens.
+ * Throws on any other failure, which signing in again wouldn't fix.
+ */
 const signIn = async (request: ReturnType<typeof createRequest>) => {
-  const page = await (await request(appUrl, { headers: pageOrigin })).text()
+  const response = await request(appUrl, { headers: pageOrigin })
+  if (response.status >= 300 && response.status < 400) return undefined
+  if (!response.ok) {
+    throw new Error(`Gemini answered the app page with HTTP ${response.status}`)
+  }
+  const page = await response.text()
   const at = tokenIn(page, 'SNlM0e')
   if (at === undefined) return undefined
   return {

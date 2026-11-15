@@ -92,7 +92,16 @@ export const installGemini = async (
     cookies[name] = value
   }
 
-  const signedIn = await checkGeminiSignIn({ cookies, fetch })
+  // A failure other than signed out, such as Google answering 503, is no fault
+  // of the cookies, so it's reported as is.
+  const signedIn = await checkGeminiSignIn({ cookies, fetch }).catch(
+    (cause: unknown) =>
+      cause instanceof Error ? cause : new Error(String(cause)),
+  )
+  if (signedIn instanceof Error) {
+    console.error(`threadslop: ${signedIn.message}`)
+    return 1
+  }
   if (signedIn === undefined) {
     console.error("threadslop: those cookies don't sign in to Gemini")
     return 1

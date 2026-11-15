@@ -550,6 +550,21 @@ describe('POST /sync when Gemini fails', () => {
     )
   })
 
+  test.each([503, 429])(
+    'records an app page answered with HTTP %p as that, not as signed out',
+    async (status) => {
+      gemini.failAppPage(status)
+
+      await sync()
+
+      expect(await geminiRow()).toEqual(
+        expect.objectContaining({
+          lastError: `Gemini answered the app page with HTTP ${status}`,
+        }),
+      )
+    },
+  )
+
   test('records a throttled answer as a failure and keeps archived Items', async () => {
     await sync()
     gemini.putChat({
