@@ -232,8 +232,12 @@ const resultOf = (text: string, rpc: string): unknown => {
     evidence.length > 0
       ? `: ${evidence.map((item) => item.slice(0, 200)).join(' ')}`
       : '; throttled?'
-  throw new Error(`Gemini answered ${rpc} without a result${detail}`)
+  const message = `Gemini answered ${rpc} without a result${detail}`
+  throw result === undefined ? new Error(message) : new GeminiRefusal(message)
 }
+
+/** Google answered the rpc with an error in place of its result. */
+class GeminiRefusal extends Error {}
 
 const tokenIn = (page: string, key: string) =>
   page.match(new RegExp(`"${key}":\\s*"(.*?)"`))?.[1]
@@ -408,12 +412,22 @@ export const connectGemini = async ({
   return {
     /** One page of chats, most recently updated first. */
     listChats: async (pageToken?: string) => {
-      const body = await call(rpcs.listChats, [
-        chatsPerPage,
-        pageToken ?? null,
-        [0, null, 1],
-      ])
-      return parseOrThrow('Gemini chat list', () => parseListPage(body))
+      try {
+        const body = await call(rpcs.listChats, [
+          chatsPerPage,
+          pageToken ?? null,
+          [0, null, 1],
+        ])
+        return parseOrThrow('Gemini chat list', () => parseListPage(body))
+      } catch (error) {
+        // Google refuses every page from a chat it can't load onward, so a
+        // later page it refuses ends the list. Throttles still fail.
+        if (pageToken === undefined || !(error instanceof GeminiRefusal)) {
+          throw error
+        }
+        console.warn(`${error.message}; the list ends at the page before`)
+        return { chats: [], nextPageToken: undefined }
+      }
     },
 
     /** A chat's turns, oldest first. */
