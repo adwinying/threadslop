@@ -63,7 +63,7 @@ describe('POST /sync with a Gemini session', () => {
       },
       items: [
         expect.objectContaining({
-          id: 'r_first:user_message',
+          id: '8f1e2d3c4b5a6978:r_first:user_message',
           type: 'user_message',
           role: 'user',
           status: 'completed',
@@ -76,17 +76,17 @@ describe('POST /sync with a Gemini session', () => {
           updatedAt: '2026-11-01T08:00:00.000Z',
         }),
         expect.objectContaining({
-          id: 'r_first:assistant_message',
+          id: '8f1e2d3c4b5a6978:r_first:assistant_message',
           role: 'assistant',
           text: 'Feed it **once a day** at room temperature.',
         }),
         expect.objectContaining({
-          id: 'r_second:user_message',
+          id: '8f1e2d3c4b5a6978:r_second:user_message',
           text: 'And in the fridge?',
           createdAt: '2026-11-02T09:00:00.000Z',
         }),
         expect.objectContaining({
-          id: 'r_second:assistant_message',
+          id: '8f1e2d3c4b5a6978:r_second:assistant_message',
           text: 'Once a week is enough.',
         }),
       ],
@@ -113,8 +113,28 @@ test('POST /sync archives a turn Gemini never answered as its prompt alone', asy
 
   expect(await getJson('/threads/gemini/4d5e6f7081920314?items=all')).toEqual({
     thread: expect.anything(),
-    items: [expect.objectContaining({ id: 'r_stopped:user_message' })],
+    items: [
+      expect.objectContaining({
+        id: '4d5e6f7081920314:r_stopped:user_message',
+      }),
+    ],
   })
+})
+
+test('POST /sync keeps two chats apart when their turns share a response ID', async () => {
+  gemini.putChat({
+    id: '6f708192031425ab',
+    title: 'Rye starter',
+    updatedAt: '2026-11-09T10:00:00.000Z',
+    turns: [{ ...sourdough.turns[0], prompt: 'And a rye starter?' }],
+  })
+
+  await sync()
+
+  expect(await messageTexts(sourdough.id)).toContain(
+    'How often should I feed a sourdough starter?',
+  )
+  expect(await messageTexts('6f708192031425ab')).toContain('And a rye starter?')
 })
 
 describe('POST /sync with a turn that has reasoning', () => {
@@ -142,14 +162,18 @@ describe('POST /sync with a turn that has reasoning', () => {
       {
         thread: expect.anything(),
         items: [
-          expect.objectContaining({ id: 'r_sieve:user_message' }),
           expect.objectContaining({
-            id: 'r_sieve:reasoning',
+            id: '0f9e8d7c6b5a4321:r_sieve:user_message',
+          }),
+          expect.objectContaining({
+            id: '0f9e8d7c6b5a4321:r_sieve:reasoning',
             type: 'reasoning',
             role: null,
             text: 'Trial division is too slow; Eratosthenes fits.',
           }),
-          expect.objectContaining({ id: 'r_sieve:assistant_message' }),
+          expect.objectContaining({
+            id: '0f9e8d7c6b5a4321:r_sieve:assistant_message',
+          }),
         ],
       },
     )
@@ -201,7 +225,7 @@ describe('POST /sync with a reply that cites sources', () => {
           expect.objectContaining({ type: 'reasoning' }),
           expect.objectContaining({ type: 'assistant_message' }),
           expect.objectContaining({
-            id: 'r_hydration:web_sources',
+            id: '1a2b3c4d5e6f7081:r_hydration:web_sources',
             type: 'web_sources',
             role: null,
             payload: JSON.stringify({

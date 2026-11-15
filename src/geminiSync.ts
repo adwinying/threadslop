@@ -3,12 +3,19 @@ import type { Fetch, ListedChat, Turn } from '~/gemini'
 import { extractSearchText } from '~/extract'
 import { connectGemini, geminiLabel } from '~/gemini'
 
-const toItem = (turn: Turn, type: string, payload: object) => {
+const toItem = (
+  threadId: string,
+  turn: Turn,
+  type: string,
+  payload: object,
+) => {
   const at = turn.at.toISOString()
   const json = JSON.stringify(payload)
   return {
-    // Stable across re-reads, so a re-read chat updates its rows.
-    id: `${turn.responseId}:${type}`,
+    // Stable across re-reads, so a re-read Thread updates its rows. Item IDs
+    // are unique per Source, and the response ID's position is a guess, so
+    // the Thread ID keeps one Thread's Items from ever replacing another's.
+    id: `${threadId}:${turn.responseId}:${type}`,
     type,
     status: 'completed',
     createdAt: at,
@@ -35,22 +42,26 @@ const replyText = ({ reply, generated }: Turn) =>
     reply,
   )
 
-const toItems = (turn: Turn) => [
-  toItem(turn, 'user_message', { text: promptText(turn) }),
-  ...(turn.reasoning === ''
-    ? []
-    : [toItem(turn, 'reasoning', { text: turn.reasoning })]),
-  ...(turn.reply === ''
-    ? []
-    : [toItem(turn, 'assistant_message', { text: replyText(turn) })]),
-  ...(turn.sources.length === 0
-    ? []
-    : [toItem(turn, 'web_sources', { sources: turn.sources })]),
-]
+const toItems = (threadId: string, turn: Turn) => {
+  const item = (type: string, payload: object) =>
+    toItem(threadId, turn, type, payload)
+  return [
+    item('user_message', { text: promptText(turn) }),
+    ...(turn.reasoning === ''
+      ? []
+      : [item('reasoning', { text: turn.reasoning })]),
+    ...(turn.reply === ''
+      ? []
+      : [item('assistant_message', { text: replyText(turn) })]),
+    ...(turn.sources.length === 0
+      ? []
+      : [item('web_sources', { sources: turn.sources })]),
+  ]
+}
 
 const toArchivedThread = (chat: ListedChat, turns: Turn[]): ArchivedThread => {
   const items = turns
-    .flatMap(toItems)
+    .flatMap((turn) => toItems(chat.threadId, turn))
     .map((item, ordinal) => ({ ...item, ordinal }))
   const updatedAt = chat.updatedAt.toISOString()
   return {
