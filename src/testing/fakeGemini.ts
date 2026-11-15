@@ -32,8 +32,6 @@ export type ChatFixture = {
   updatedAt: string
   /** Oldest first. */
   turns: TurnFixture[]
-  /** Sets the read's "more turns" marker, as for a chat over the turn limit. */
-  truncated?: boolean
   /** Google can't load it, so it refuses every list page holding it. */
   broken?: boolean
 }
@@ -49,7 +47,10 @@ const rotateBody = '[000,"-0000000000000000000"]'
 const requestSchema = z.tuple([
   z.tuple([z.tuple([z.string(), z.string()], z.unknown())]),
 ])
-const readPayloadSchema = z.tuple([z.string().startsWith('c_')], z.unknown())
+const readPayloadSchema = z.tuple(
+  [z.string().startsWith('c_'), z.number(), z.string().nullable()],
+  z.unknown(),
+)
 const listPayloadSchema = z.tuple(
   [z.number(), z.string().nullable()],
   z.unknown(),
@@ -239,11 +240,17 @@ export const createFakeGemini = () => {
       const id = chatIdOf(payload)
       const chat = chats.get(id)
       if (!chat) throw new Error(`fake Gemini has no chat ${id}`)
-      // Newest first, so the client must order turns itself.
+      // Newest first, `perPage` at a time, like the list.
+      const [, perPage, pageToken] = readPayloadSchema.parse(payload)
+      const start = pageToken === null ? 0 : Number(pageToken)
+      const next = start + perPage
       return [
         resultFrame(rpc, [
-          chat.turns.map((turn) => wireTurn(id, turn)).toReversed(),
-          chat.truncated ? 'fake-more-turns-token' : null,
+          chat.turns
+            .toReversed()
+            .slice(start, next)
+            .map((turn) => wireTurn(id, turn)),
+          next < chat.turns.length ? String(next) : null,
         ]),
       ]
     }
