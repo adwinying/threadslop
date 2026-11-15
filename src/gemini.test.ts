@@ -617,15 +617,22 @@ describe('POST /sync when Gemini fails', () => {
     })
   })
 
-  test("records Google's error frame when it refuses an rpc", async () => {
-    gemini.refuseRpcs(7)
+  test("records Google's error frame when it refuses the first page", async () => {
+    gemini.putChat({
+      id: 'b40ce7e9a1d2f3c4',
+      title: 'Broken',
+      updatedAt: '2026-11-05T00:00:00.000Z',
+      turns: [],
+      broken: true,
+    })
 
     await sync()
 
     expect(await geminiRow()).toEqual(
       expect.objectContaining({
-        lastError:
-          'Gemini answered MaZiqc without a result: ["wrb.fr","MaZiqc",null,null,null,[7],"generic"]',
+        lastError: expect.stringContaining(
+          `Gemini answered MaZiqc without a result: ["wrb.fr","MaZiqc",null,null,null,[13,null,[["type.googleapis.com/assistant.boq.bard.application.BardErrorInfo",[1096,null,"Couldn't load conversation.`,
+        ),
       }),
     )
   })
@@ -776,6 +783,57 @@ describe('POST /sync with a backlog', () => {
       'MaZiqc',
       'hNvQHb',
     ])
+  })
+})
+
+describe('POST /sync with a chat Google cannot load', () => {
+  test('ends the list at the later page Google refuses', async () => {
+    gemini.removeChat(sourdough.id)
+    const ids = putChats(150)
+    // Older than every other chat, so on page 2.
+    gemini.putChat({
+      id: 'b40ce7e9a1d2f3c4',
+      title: 'Broken',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+      turns: [],
+      broken: true,
+    })
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({
+        lastSuccessAt: expect.any(String),
+        lastError: null,
+      }),
+    )
+    // The oldest changed chats of page 1, the newest 100.
+    expect(gemini.reads()).toEqual(ids.slice(50, 80))
+  })
+
+  test('fails on a later page Google refuses for another reason', async () => {
+    putChats(150)
+    let calls = 0
+    testApp = createTestApp({
+      hosts: [],
+      fetch: async (url, init) =>
+        url.includes('/batchexecute') && ++calls === 2
+          ? new Response(
+              `)]}'\n\n${JSON.stringify([['wrb.fr', 'MaZiqc', null, null, null, [7], 'generic']])}\n`,
+            )
+          : gemini.fetch(url, init),
+    })
+    gemini.storeSession(testApp.root)
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({
+        lastSuccessAt: null,
+        lastError:
+          'Gemini answered MaZiqc without a result: ["wrb.fr","MaZiqc",null,null,null,[7],"generic"]',
+      }),
+    )
   })
 })
 

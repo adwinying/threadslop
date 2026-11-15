@@ -31,6 +31,8 @@ export type ChatFixture = {
   turns: TurnFixture[]
   /** Sets the read's "more turns" marker, as for a chat over the turn limit. */
   truncated?: boolean
+  /** Google can't load it, so it refuses every list page holding it. */
+  broken?: boolean
 }
 
 const cookies = {
@@ -141,19 +143,29 @@ const resultFrame = (rpc: string, body: unknown) => [
   'generic',
 ]
 
-// A result frame with an error code where the body would be.
-const refusalFrame = (rpc: string, code: number) => [
+// What Google sends for a list page holding a chat it can't load.
+const refusalFrame = (rpc: string) => [
   'wrb.fr',
   rpc,
   null,
   null,
   null,
-  [code],
+  [
+    13,
+    null,
+    [
+      [
+        'type.googleapis.com/assistant.boq.bard.application.BardErrorInfo',
+        [1096, null, "Couldn't load conversation. Try again. (1096)"],
+      ],
+    ],
+  ],
   'generic',
 ]
 
-// What Google sends instead of a result while it throttles.
-const throttledFrames = [
+// Frames every response carries. Alone, they're what Google sends while it
+// throttles.
+const routineFrames = [
   ['di', 12],
   ['af.httprm', 11, '-4011571396556183958', 4],
   ['e', 4, null, null, 139],
@@ -182,7 +194,6 @@ export const createFakeGemini = () => {
   let appPageStatus: number | undefined
   let answersBeforeThrottle = Infinity
   let refusingRotations = false
-  let refusalCode: number | undefined
 
   const hasSessionCookies = (header: string) =>
     [...accepted].every(([name, value]) =>
@@ -210,11 +221,16 @@ export const createFakeGemini = () => {
       const listed = [...chats.values()]
         .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
         .slice(start, start + perPage)
+      if (listed.some((chat) => chat.broken)) {
+        return [refusalFrame(rpc), ...routineFrames]
+      }
       const next = start + perPage
       return [
-        null,
-        next < chats.size ? String(next) : null,
-        listed.map(listedChat),
+        resultFrame(rpc, [
+          null,
+          next < chats.size ? String(next) : null,
+          listed.map(listedChat),
+        ]),
       ]
     }
     if (rpc === 'hNvQHb') {
@@ -223,8 +239,10 @@ export const createFakeGemini = () => {
       if (!chat) throw new Error(`fake Gemini has no chat ${id}`)
       // Newest first, so the client must order turns itself.
       return [
-        chat.turns.map((turn) => wireTurn(id, turn)).toReversed(),
-        chat.truncated ? 'fake-more-turns-token' : null,
+        resultFrame(rpc, [
+          chat.turns.map((turn) => wireTurn(id, turn)).toReversed(),
+          chat.truncated ? 'fake-more-turns-token' : null,
+        ]),
       ]
     }
     throw new Error(`fake Gemini has no rpc ${rpc}`)
@@ -277,16 +295,9 @@ export const createFakeGemini = () => {
       }
       const parsed: unknown = JSON.parse(payload)
       requests.push({ rpc, payload: parsed })
-      if (refusalCode !== undefined) {
-        return respond(
-          chunked([refusalFrame(rpc, refusalCode), ...throttledFrames]),
-        )
-      }
       return respond(
         chunked(
-          answersBeforeThrottle-- <= 0
-            ? throttledFrames
-            : [resultFrame(rpc, answer(rpc, parsed))],
+          answersBeforeThrottle-- <= 0 ? routineFrames : answer(rpc, parsed),
         ),
       )
     }
@@ -344,10 +355,6 @@ export const createFakeGemini = () => {
      */
     throttle: (answered = 0) => {
       answersBeforeThrottle = answered
-    },
-    /** Refuses every rpc with batchexecute's error frame carrying `code`. */
-    refuseRpcs: (code: number) => {
-      refusalCode = code
     },
   }
 }

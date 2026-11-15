@@ -14,3 +14,4 @@ Gemini has no API for reading chat history, so threadslop Syncs it the way gemin
 - Google can change the call IDs or the positional response arrays at any time, so a Gemini Sync fails until threadslop's parser is fixed. `/health` shows that failure.
 - Google throttles silently, replying HTTP 200 with no data. An empty response is a failure, never an empty chat, and each Sync reads a capped number of chats.
 - A chat missing from the list can't be told apart from a deleted or auto-expired one, so Gemini Threads are never removed.
+- Google refuses every list page from a chat it can't load onward (error 1096), and no page token skips past it. A refused later page ends the list, so chats older than a broken one are never Synced. A refused first page still fails the Sync.
