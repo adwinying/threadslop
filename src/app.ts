@@ -1,15 +1,18 @@
 import type { Database } from 'bun:sqlite'
+import type { Fetch } from '~/gemini'
 import type { Host, HostTransport } from '~/hosts'
 import { cron } from '@elysiajs/cron'
 import { Elysia } from 'elysia'
 import { createArchive, migrate } from '~/archive'
+import { geminiLabel, hasGeminiSession } from '~/gemini'
+import { syncGemini } from '~/geminiSync'
 import { healthRoutes } from '~/routes/health'
 import { searchRoutes } from '~/routes/search'
 import { syncRoutes } from '~/routes/sync'
 import { threadRoutes } from '~/routes/threads'
 import { createSearch } from '~/search'
 import { snapshot } from '~/snapshot'
-import { syncAll } from '~/sync'
+import { syncAll, syncHost } from '~/sync'
 import { createThreadReader } from '~/threads'
 
 const logFailure = (job: string) => (error: unknown) => {
@@ -19,11 +22,15 @@ const logFailure = (job: string) => (error: unknown) => {
 export type AppCollaborators = {
   /** Opened with `{ strict: true }`, so queries bind `$name` params by name. */
   database: Database
-  /** Where the Snapshot is written. */
+  /** Where the Snapshot is written and the Gemini session is stored. */
   dataDir: string
   /** Read at the start of every Sync and `/health`; throws if invalid. */
   hosts: () => Host[]
   transport: HostTransport
+  /** Reaches Google for Gemini. */
+  fetch: Fetch
+  /** Milliseconds between requests to Google. */
+  geminiPace: number
   clock: () => Date
   /** Registers the cron jobs without letting them fire; tests trigger them. */
   pauseCrons?: boolean
@@ -34,11 +41,30 @@ export const createApp = ({
   dataDir,
   hosts,
   transport,
+  fetch,
+  geminiPace,
   clock,
   pauseCrons = false,
 }: AppCollaborators) => {
   migrate(database)
   const archive = createArchive(database)
+
+  // The Hosts, then Gemini while its session store exists.
+  const sources = () => [
+    ...hosts().map((host) => ({
+      label: host.label,
+      sync: () => syncHost(archive, transport, host),
+    })),
+    ...(hasGeminiSession(dataDir)
+      ? [
+          {
+            label: geminiLabel,
+            sync: () =>
+              syncGemini(archive, { dataDir, fetch, clock, pace: geminiPace }),
+          },
+        ]
+      : []),
+  ]
 
   // Syncs never overlap: callers arriving mid-Sync join it. A Sync never
   // rejects; its failure is logged here and per-Host results land in /health.
@@ -46,8 +72,7 @@ export const createApp = ({
   const sync = () => {
     if (running !== undefined) return { started: false, done: running }
     // Read up front, so POST /sync answers a malformed Host list with its error.
-    const listed = hosts()
-    running = syncAll(archive, transport, listed, clock)
+    running = syncAll(archive, sources(), clock)
       .catch(logFailure('Sync'))
       .finally(() => {
         running = undefined
@@ -80,7 +105,7 @@ export const createApp = ({
     .use(
       healthRoutes(() => ({
         syncing: running !== undefined,
-        hosts: archive.health(hosts().map(({ label }) => label)),
+        hosts: archive.health(sources().map(({ label }) => label)),
       })),
     )
     .use(syncRoutes(() => sync().started))

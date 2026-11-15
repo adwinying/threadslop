@@ -6,6 +6,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { geminiLabel } from '~/gemini'
 
 // No leading dash in either part, so ssh never reads an entry as an option.
 const destinationPattern = /^[\w.][\w.-]*@[a-z\d][a-z\d.-]*$/i
@@ -23,6 +24,11 @@ export const hostSchema = z
       destination: `${entry.slice(0, at)}@${label}`,
     }
   })
+  // Labels name Sources in the archive, so no Host may take Gemini's.
+  .refine(
+    ({ label }) => label !== geminiLabel,
+    `uses ${geminiLabel}, reserved for Gemini`,
+  )
 
 export type Host = z.infer<typeof hostSchema>
 
@@ -50,7 +56,7 @@ export const readHosts = (dataDir: string) => {
     const invalid = (reason: string) =>
       new Error(`${file} line ${index + 1}: ${entry} ${reason}`)
     const host = hostSchema.safeParse(entry)
-    if (!host.success) throw invalid('must be user@host')
+    if (!host.success) throw invalid(host.error.issues[0]?.message ?? '')
     if (hosts.some(({ label }) => label === host.data.label)) {
       throw invalid(`repeats the hostname ${host.data.label}`)
     }

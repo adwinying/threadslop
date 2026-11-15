@@ -253,6 +253,9 @@ export const createTestApp = ({
     transport: createFakeTransport(root, (label, operation) =>
       queries.push({ label, operation }),
     ),
+    // Never reaches Google; pass a fake Gemini's `fetch` to Sync Gemini.
+    fetch: (url) => Promise.reject(new Error(`no network in tests: ${url}`)),
+    geminiPace: 0,
     clock: () => testNow,
     pauseCrons: true,
     ...collaborators,

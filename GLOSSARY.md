@@ -1,19 +1,27 @@
 # threadslop
 
-Collects T3 Code conversations from every machine into one searchable archive on nas, so Adwin and agents can recall past work.
+Collects T3 Code conversations from every machine, plus Adwin's Gemini chats, into one searchable archive on nas, so Adwin and agents can recall past work.
 
 ## Language
 
+**Source**:
+Somewhere threadslop pulls Threads from: a Host, or Gemini.
+_Avoid_: Provider, origin, account
+
 **Host**:
-A machine running T3 Code that threadslop pulls conversations from.
+A Source that is a machine running T3 Code.
 _Avoid_: Machine, node, client
 
+**Gemini**:
+The Source holding Adwin's chats in the gemini.google.com web app.
+_Avoid_: Bard, Gemini API
+
 **Thread**:
-One T3 Code conversation, identified by its Host and thread ID.
+One conversation, identified by its Source and ID: a T3 Code thread or a Gemini chat.
 _Avoid_: Conversation, chat, session
 
 **Item**:
-Anything recorded in a Thread: a Message, reasoning, a tool call with its input and output, a command, a file change.
+Anything recorded in a Thread: a Message, reasoning, a tool call with its input and output, a command, a file change, the web sources a reply cites.
 _Avoid_: Node, event, turn item
 
 **Message**:
@@ -21,11 +29,11 @@ An Item holding user or assistant text.
 _Avoid_: Turn, entry
 
 **Signature**:
-A Thread's latest change time plus its Item count, as last reported by its Host. A changed Signature means the Thread needs re-pulling.
+A Thread's latest change time, plus its Item count when its Source reports one, as last reported by its Source. A changed Signature means the Thread needs re-pulling.
 _Avoid_: Checksum, version, watermark
 
 **Sync**:
-One pass that compares every Host's Signatures with the stored ones and pulls the Threads that changed.
+One pass that compares every Source's Signatures with the stored ones and pulls the Threads that changed.
 _Avoid_: Import, backup, push
 
 **Snapshot**:

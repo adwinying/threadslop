@@ -47,6 +47,22 @@ const extractors = new Map<string, z.ZodType<string>>([
       .object({ patterns: z.array(z.string()) })
       .transform(({ patterns }) => patterns.join(' ')),
   ],
+  [
+    'web_sources',
+    z
+      .object({
+        sources: z.array(
+          z.object({ url: z.string(), title: z.string().optional() }),
+        ),
+      })
+      .transform(({ sources }) =>
+        sources
+          .flatMap(({ url, title }) =>
+            title === undefined ? [url] : [title, url],
+          )
+          .join('\n'),
+      ),
+  ],
 ])
 
 const parseJson = (text: string): unknown => {

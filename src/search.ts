@@ -1,10 +1,11 @@
 import type { Database } from 'bun:sqlite'
 import type { ItemScope } from '~/itemScope'
+import { geminiChatUrl, geminiLabel } from '~/gemini'
 import { inScopeSql, roleOf } from '~/itemScope'
 
 type HitRow = {
   host: string
-  environmentId: string
+  environmentId: string | null
   threadId: string
   threadTitle: string
   project: string | null
@@ -31,7 +32,10 @@ const toHit = ({ archived, ...row }: HitRow) => ({
   ...row,
   role: roleOf(row.itemType),
   archived: archived === 1,
-  link: `t3-thread://v2/${row.environmentId}/${row.threadId}`,
+  link:
+    row.host === geminiLabel
+      ? geminiChatUrl(row.threadId)
+      : `t3-thread://v2/${row.environmentId}/${row.threadId}`,
 })
 
 /** Quotes a query as one FTS5 phrase so its operators match literally. */

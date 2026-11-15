@@ -143,20 +143,22 @@ export const syncHost = async (
   }
 }
 
-/** Syncs every Host in turn. A failing Host is recorded and skipped. */
+/** A Source to Sync: a Host or Gemini. */
+export type Source = { label: string; sync: () => Promise<void> }
+
+/** Syncs every Source in turn. A failing Source is recorded and skipped. */
 export const syncAll = async (
   archive: Archive,
-  transport: HostTransport,
-  hosts: Host[],
+  sources: Source[],
   clock: () => Date,
 ) => {
-  for (const host of hosts) {
+  for (const { label, sync } of sources) {
     try {
-      await syncHost(archive, transport, host)
-      archive.recordSuccess(host.label, clock())
+      await sync()
+      archive.recordSuccess(label, clock())
     } catch (cause) {
       const error = cause instanceof Error ? cause.message : String(cause)
-      archive.recordFailure(host.label, error, clock())
+      archive.recordFailure(label, error, clock())
     }
   }
 }
