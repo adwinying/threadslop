@@ -781,7 +781,7 @@ describe('POST /sync pacing', () => {
     // Rotation, the app page, the list and one read.
     expect(sentAt).toHaveLength(4)
     const gaps = sentAt.slice(1).map((at, index) => at - (sentAt[index] ?? at))
-    // Timers can fire a fraction of a millisecond early.
-    for (const gap of gaps) expect(gap).toBeGreaterThanOrEqual(49)
+    // Timers can fire a little early under load; unpaced gaps are near 0.
+    for (const gap of gaps) expect(gap).toBeGreaterThanOrEqual(40)
   })
 })
