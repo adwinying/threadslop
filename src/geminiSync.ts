@@ -51,9 +51,9 @@ const toArchivedThread = (chat: ListedChat, turns: Turn[]): ArchivedThread => {
  */
 export const syncGemini = async (
   archive: Archive,
-  { dataDir, fetch }: { dataDir: string; fetch: Fetch },
+  collaborators: { dataDir: string; fetch: Fetch; clock: () => Date },
 ) => {
-  const gemini = await connectGemini({ dataDir, fetch })
+  const gemini = await connectGemini(collaborators)
   archive.recordHost(geminiLabel, null)
   const stored = archive.signatures(geminiLabel)
 

@@ -1,5 +1,7 @@
 import type { FakeGemini } from '~/testing/fakeGemini'
 import { beforeEach, describe, expect, test } from 'bun:test'
+import { chmodSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { z } from 'zod'
 import { createFakeGemini } from '~/testing/fakeGemini'
 import { createFakeHost, createTestApp, testNow } from '~/testing/fakeHost'
@@ -209,6 +211,74 @@ describe('GET /health', () => {
 
     expect(await health()).toEqual({ syncing: false, hosts: [] })
     expect(gemini.requests).toEqual([])
+  })
+})
+
+const minutesBeforeNow = (minutes: number) =>
+  new Date(+testNow - minutes * 60_000)
+
+describe('POST /sync and the Google session', () => {
+  test('rotates the cookies when the last rotation is 10 minutes old', async () => {
+    gemini.storeSession(testApp.root, { rotatedAt: minutesBeforeNow(10) })
+
+    await sync()
+
+    expect(gemini.rotations()).toBe(1)
+  })
+
+  test("doesn't rotate within 10 minutes of the last rotation", async () => {
+    gemini.storeSession(testApp.root, { rotatedAt: minutesBeforeNow(9.99) })
+
+    await sync()
+
+    expect(gemini.rotations()).toBe(0)
+  })
+
+  test('uses rotated cookies for the next request and the next Sync', async () => {
+    await sync()
+    await sync()
+
+    expect(gemini.rotations()).toBe(1)
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({ lastError: null }),
+    )
+  })
+
+  test('keeps cookies any Google response sets', async () => {
+    gemini.storeSession(testApp.root, { rotatedAt: testNow })
+    gemini.issueCookie('__Secure-1PSIDTS', 'refreshed-by-app-page')
+
+    await sync()
+    await sync()
+
+    expect(gemini.rotations()).toBe(0)
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({ lastError: null }),
+    )
+  })
+
+  test('Syncs on when Google refuses a rotation', async () => {
+    gemini.refuseRotations()
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({ lastError: null }),
+    )
+    expect(await getJson('/search?q=fridge')).toEqual({
+      hits: [expect.objectContaining({ threadId: '8f1e2d3c4b5a6978' })],
+    })
+  })
+
+  test('keeps the session store readable by its owner only', async () => {
+    chmodSync(join(testApp.root, 'gemini-session.json'), 0o644)
+
+    await sync()
+
+    expect(gemini.rotations()).toBe(1)
+    expect(
+      statSync(join(testApp.root, 'gemini-session.json')).mode & 0o777,
+    ).toBe(0o600)
   })
 })
 

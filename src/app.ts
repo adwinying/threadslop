@@ -59,7 +59,7 @@ export const createApp = ({
     if (hasGeminiSession(dataDir)) {
       sources.push({
         label: geminiLabel,
-        sync: () => syncGemini(archive, { dataDir, fetch }),
+        sync: () => syncGemini(archive, { dataDir, fetch, clock }),
       })
     }
     running = syncAll(archive, sources, clock)

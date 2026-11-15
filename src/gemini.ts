@@ -1,4 +1,10 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 
@@ -19,6 +25,8 @@ export type Fetch = (url: string, init: RequestInit) => Promise<Response>
 
 const sessionSchema = z.object({
   cookies: z.record(z.string(), z.string()),
+  /** Absent until the first rotation. */
+  rotatedAt: z.coerce.date().optional(),
 })
 
 export type GeminiSession = z.infer<typeof sessionSchema>
@@ -33,6 +41,8 @@ export const hasGeminiSession = (dataDir: string) =>
 export const saveGeminiSession = (dataDir: string, session: GeminiSession) => {
   const file = sessionFile(dataDir)
   const temporary = `${file}.tmp`
+  // A file left by an interrupted save would keep its mode.
+  rmSync(temporary, { force: true })
   writeFileSync(temporary, JSON.stringify(session), { mode: 0o600 })
   renameSync(temporary, file)
 }
@@ -55,6 +65,8 @@ export type Turn = {
 const userAgent =
   'Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0'
 const appUrl = 'https://gemini.google.com/app'
+const rotateUrl = 'https://accounts.google.com/RotateCookies'
+const rotationInterval = 10 * 60 * 1000
 const batchUrl = 'https://gemini.google.com/_/BardChatUi/data/batchexecute'
 const pageOrigin = {
   Origin: 'https://gemini.google.com',
@@ -179,17 +191,24 @@ const tokenIn = (page: string, key: string) =>
   page.match(new RegExp(`"${key}":\\s*"(.*?)"`))?.[1]
 
 /**
- * Signs in to Gemini with the stored session. Throws when the session no
- * longer signs in.
+ * Signs in to Gemini with the stored session, rotating its cookies when the
+ * last rotation is old enough. Throws when the session no longer signs in.
  */
 export const connectGemini = async ({
   dataDir,
   fetch,
+  clock,
 }: {
   dataDir: string
   fetch: Fetch
+  clock: () => Date
 }) => {
-  const jar = new Map(Object.entries(loadSession(dataDir).cookies))
+  const session = loadSession(dataDir)
+  const jar = new Map(Object.entries(session.cookies))
+  let { rotatedAt } = session
+  const save = () => {
+    saveGeminiSession(dataDir, { cookies: Object.fromEntries(jar), rotatedAt })
+  }
 
   const request = async (
     url: string,
@@ -207,12 +226,32 @@ export const connectGemini = async ({
         ...init.headers,
       },
     })
-    for (const header of response.headers.getSetCookie()) {
+    const setCookies = response.headers.getSetCookie()
+    for (const header of setCookies) {
       const [pair = ''] = header.split(';')
       const index = pair.indexOf('=')
       jar.set(pair.slice(0, index), pair.slice(index + 1))
     }
+    // Saved at once: Google may already reject the cookies they replace.
+    if (setCookies.length > 0) save()
     return response
+  }
+
+  if (rotatedAt === undefined || +clock() - +rotatedAt >= rotationInterval) {
+    const rotation = await request(rotateUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://accounts.google.com',
+      },
+      body: '[000,"-0000000000000000000"]',
+    })
+    // A refusal isn't fatal: Google answers 429 to rotations minutes apart,
+    // and the sign-in check below judges whether the session still works.
+    if (rotation.ok) {
+      rotatedAt = clock()
+      save()
+    }
   }
 
   const page = await (await request(appUrl, { headers: pageOrigin })).text()

@@ -27,11 +27,7 @@ const cookies = {
   '__Secure-1PSIDTS': 'fake-psidts',
 }
 const accessToken = 'fake-at-token'
-
-const hasSessionCookies = (header: string) =>
-  Object.entries(cookies).every(([name, value]) =>
-    header.split('; ').includes(`${name}=${value}`),
-  )
+const rotateBody = '[000,"-0000000000000000000"]'
 
 /** batchexecute's `f.req`: the rpc with its payload, JSON-encoded again. */
 const requestSchema = z.tuple([
@@ -99,8 +95,32 @@ export type GeminiRequest = { rpc: string; payload: unknown }
 export const createFakeGemini = () => {
   const chats = new Map<string, ChatFixture>()
   const requests: GeminiRequest[] = []
+  // The cookies Google accepts: the latest it set for each name.
+  const accepted = new Map(Object.entries(cookies))
+  let unsent: [name: string, value: string][] = []
+  let rotations = 0
   let signedIn = true
   let throttled = false
+  let refusingRotations = false
+
+  const hasSessionCookies = (header: string) =>
+    [...accepted].every(([name, value]) =>
+      header.split('; ').includes(`${name}=${value}`),
+    )
+
+  /** A response that sets the cookies not yet sent, which replace the old. */
+  const respond = (body: BodyInit | null, init: ResponseInit = {}) => {
+    const headers = new Headers(init.headers)
+    for (const [name, value] of unsent) {
+      accepted.set(name, value)
+      headers.append(
+        'Set-Cookie',
+        `${name}=${value}; Domain=.google.com; Path=/; Expires=Mon, 15-Nov-2027 00:00:00 GMT; Secure; HttpOnly; SameSite=none`,
+      )
+    }
+    unsent = []
+    return new Response(body, { ...init, headers })
+  }
 
   const answer = (rpc: string, payload: unknown) => {
     if (rpc === 'MaZiqc') {
@@ -126,11 +146,25 @@ export const createFakeGemini = () => {
 
     if (origin === 'https://gemini.google.com' && pathname === '/app') {
       return authorized
-        ? new Response(signedInPage)
-        : new Response(null, {
+        ? respond(signedInPage)
+        : respond(null, {
             status: 302,
             headers: { Location: 'https://accounts.google.com/ServiceLogin' },
           })
+    }
+
+    if (
+      origin === 'https://accounts.google.com' &&
+      pathname === '/RotateCookies'
+    ) {
+      if (init.method !== 'POST' || init.body !== rotateBody) {
+        return respond(null, { status: 400 })
+      }
+      if (!authorized) return respond(null, { status: 401 })
+      if (refusingRotations) return respond(null, { status: 429 })
+      rotations += 1
+      unsent.push(['__Secure-1PSIDTS', `fake-psidts-rotated-${rotations}`])
+      return respond(null)
     }
 
     if (
@@ -139,17 +173,17 @@ export const createFakeGemini = () => {
     ) {
       const form = new URLSearchParams(await new Response(init.body).text())
       if (!authorized || form.get('at') !== accessToken) {
-        return new Response(null, { status: 401 })
+        return respond(null, { status: 401 })
       }
       const [[[rpc, payload]]] = requestSchema.parse(
         JSON.parse(form.get('f.req') ?? ''),
       )
       if (rpc !== searchParams.get('rpcids')) {
-        return new Response(null, { status: 400 })
+        return respond(null, { status: 400 })
       }
       const parsed: unknown = JSON.parse(payload)
       requests.push({ rpc, payload: parsed })
-      return new Response(
+      return respond(
         chunked(
           throttled ? throttledFrames : [resultFrame(rpc, answer(rpc, parsed))],
         ),
@@ -168,9 +202,25 @@ export const createFakeGemini = () => {
       requests
         .filter(({ rpc }) => rpc === 'hNvQHb')
         .map(({ payload }) => chatIdOf(payload)),
-    /** Stores a session for this fake in the data directory. */
-    storeSession: (dataDir: string) => {
-      saveGeminiSession(dataDir, { cookies })
+    /**
+     * Stores a session for this fake in the data directory, as install-gemini
+     * does, or as a Sync left it after rotating at `rotatedAt`.
+     */
+    storeSession: (
+      dataDir: string,
+      { rotatedAt }: { rotatedAt?: Date } = {},
+    ) => {
+      saveGeminiSession(dataDir, { cookies, rotatedAt })
+    },
+    /** How many times the cookies were rotated. */
+    rotations: () => rotations,
+    /** Sets a cookie with the next response and accepts only it from then on. */
+    issueCookie: (name: string, value: string) => {
+      unsent.push([name, value])
+    },
+    /** Answers every rotation with 429, as Google does to rotations minutes apart. */
+    refuseRotations: () => {
+      refusingRotations = true
     },
     /** Adds a chat, or replaces the one with the same ID. */
     putChat: (chat: ChatFixture) => {
