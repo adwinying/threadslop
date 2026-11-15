@@ -657,35 +657,6 @@ describe('POST /sync when Gemini fails', () => {
     )
   })
 
-  test('fails a chat with more turns than one read returns, saving none of it', async () => {
-    gemini.putChat({
-      id: '5e6f708192031425',
-      title: 'Endless',
-      updatedAt: '2026-11-08T10:00:00.000Z',
-      turns: [
-        {
-          responseId: 'r_endless',
-          prompt: 'Keep going.',
-          reply: 'Going.',
-          at: '2026-11-08T10:00:00.000Z',
-        },
-      ],
-      truncated: true,
-    })
-
-    await sync()
-
-    expect(await geminiRow()).toEqual(
-      expect.objectContaining({
-        lastSuccessAt: null,
-        lastError: 'Gemini chat 5e6f708192031425 has over 200 turns',
-      }),
-    )
-    expect(
-      (await testApp.handle('/threads/gemini/5e6f708192031425')).status,
-    ).toBe(404)
-  })
-
   test('still syncs the Hosts', async () => {
     testApp = createTestApp({ hosts: ['hive'], fetch: gemini.fetch })
     gemini.storeSession(testApp.root)
@@ -717,6 +688,41 @@ describe('POST /sync when Gemini fails', () => {
         expect.objectContaining({ host: 'gemini', lastSuccessAt: null }),
       ],
     })
+  })
+})
+
+describe('POST /sync with a chat longer than one read returns', () => {
+  test('pages its turns, archiving all of them and the newer chats', async () => {
+    const turns = Array.from({ length: 201 }, (_, index) => ({
+      responseId: `r_long${index}`,
+      prompt: `Turn ${index}`,
+      reply: '',
+      at: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString(),
+    }))
+    // Older than the sourdough chat, so read first.
+    gemini.putChat({
+      id: '5e6f708192031425',
+      title: 'Long',
+      updatedAt: '2026-10-01T03:20:00.000Z',
+      turns,
+    })
+
+    await sync()
+
+    expect(gemini.reads()).toEqual([
+      '5e6f708192031425',
+      '5e6f708192031425',
+      sourdough.id,
+    ])
+    const { items } = z
+      .object({ items: z.array(z.object({ text: z.string() }).loose()) })
+      .parse(await getJson('/threads/gemini/5e6f708192031425?items=all'))
+    expect(items.map(({ text }) => text)).toEqual(
+      turns.map(({ prompt }) => prompt),
+    )
+    expect(
+      (await testApp.handle(`/threads/gemini/${sourdough.id}`)).status,
+    ).toBe(200)
   })
 })
 

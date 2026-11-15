@@ -67,9 +67,8 @@ const pageOrigin = {
 const rpcs = { listChats: 'MaZiqc', readChat: 'hNvQHb' }
 
 const chatsPerPage = 100
-// No chat in the spike's crawl had more turns. A longer one fails its read
-// rather than being saved truncated.
-const turnLimit = 200
+// More than any chat in the spike's crawl had, so most chats take one read.
+const turnsPerPage = 200
 
 /** The value at a path of array indexes, or undefined where one is missing. */
 const pick = (value: unknown, ...path: number[]) =>
@@ -177,13 +176,10 @@ const parseTurn = (turn: unknown) => {
   })
 }
 
-const parseTurns = (body: unknown) =>
-  z
-    .array(z.unknown())
-    .parse(pick(body, 0))
-    .map(parseTurn)
-    // The order turns arrive in isn't established, so sort them by time.
-    .toSorted((a, b) => +a.at - +b.at)
+const parseTurnPage = (body: unknown) => ({
+  turns: z.array(z.unknown()).parse(pick(body, 0)).map(parseTurn),
+  nextPageToken: z.string().nullish().parse(pick(body, 1)) ?? undefined,
+})
 
 /** Runs a parser, naming what didn't parse when Google's format changed. */
 const parseOrThrow = <T>(what: string, parse: () => T) => {
@@ -438,21 +434,32 @@ export const connectGemini = async ({
 
     /** A chat's turns, oldest first. */
     readChat: async (threadId: string) => {
-      const body = await call(rpcs.readChat, [
-        `c_${threadId}`,
-        turnLimit,
-        null,
-        1,
-        [1],
-        [4],
-        null,
-        1,
-      ])
-      // A marker of more turns means the read is truncated.
-      if (pick(body, 1) != null) {
-        throw new Error(`Gemini chat ${threadId} has over ${turnLimit} turns`)
-      }
-      return parseOrThrow(`Gemini chat ${threadId}`, () => parseTurns(body))
+      const turns: Turn[] = []
+      let pageToken: string | undefined
+      do {
+        const body = await call(rpcs.readChat, [
+          `c_${threadId}`,
+          turnsPerPage,
+          pageToken ?? null,
+          1,
+          [1],
+          [4],
+          null,
+          1,
+        ])
+        const page = parseOrThrow(`Gemini chat ${threadId}`, () =>
+          parseTurnPage(body),
+        )
+        // Guards against paging forever: Syncs never overlap, so one stuck
+        // read would stall every Source.
+        if (page.nextPageToken !== undefined && page.turns.length === 0) {
+          throw new Error(`Gemini chat ${threadId} paged without turns`)
+        }
+        turns.push(...page.turns)
+        pageToken = page.nextPageToken
+      } while (pageToken !== undefined)
+      // Pages run newest first, but the order within one isn't established.
+      return turns.toSorted((a, b) => +a.at - +b.at)
     },
   }
 }
