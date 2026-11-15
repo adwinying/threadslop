@@ -88,23 +88,23 @@ const listedChatSchema = z.object({
   updatedAt: timestampSchema,
 })
 
-const parseListPage = (body: unknown) => ({
-  chats:
-    z
-      .array(z.unknown())
-      // An account without chats lists none.
-      .nullish()
-      .parse(pick(body, 2))
-      ?.map((chat): ListedChat => {
-        const { chatId, title, updatedAt } = listedChatSchema.parse({
-          chatId: pick(chat, 0),
-          title: pick(chat, 1),
-          updatedAt: pick(chat, 5),
-        })
-        return { threadId: chatId.slice('c_'.length), title, updatedAt }
-      }) ?? [],
-  nextPageToken: z.string().nullish().parse(pick(body, 1)) ?? undefined,
-})
+const parseListedChat = (chat: unknown): ListedChat => {
+  const { chatId, title, updatedAt } = listedChatSchema.parse({
+    chatId: pick(chat, 0),
+    title: pick(chat, 1),
+    updatedAt: pick(chat, 5),
+  })
+  return { threadId: chatId.slice('c_'.length), title, updatedAt }
+}
+
+const parseListPage = (body: unknown) => {
+  // An account without chats lists none.
+  const chats = z.array(z.unknown()).nullish().parse(pick(body, 2)) ?? []
+  return {
+    chats: chats.map(parseListedChat),
+    nextPageToken: z.string().nullish().parse(pick(body, 1)) ?? undefined,
+  }
+}
 
 const turnSchema = z.object({
   responseId: z.string().min(1),
@@ -135,6 +135,18 @@ const parseTurns = (body: unknown) =>
     .map(parseTurn)
     // The order turns arrive in isn't established, so sort them by time.
     .toSorted((a, b) => +a.at - +b.at)
+
+/** Runs a parser, naming what didn't parse when Google's format changed. */
+const parseOrThrow = <T>(what: string, parse: () => T) => {
+  try {
+    return parse()
+  } catch (cause) {
+    if (!(cause instanceof z.ZodError)) throw cause
+    throw new Error(`${what} didn't parse: ${z.prettifyError(cause)}`, {
+      cause,
+    })
+  }
+}
 
 /** Parses a line of JSON, or gives undefined when it isn't JSON. */
 const parseLine = (line: string): unknown => {
@@ -254,14 +266,14 @@ export const connectGemini = async ({
 
   return {
     /** One page of chats, most recently updated first. */
-    listChats: async (pageToken?: string) =>
-      parseListPage(
-        await call(rpcs.listChats, [
-          chatsPerPage,
-          pageToken ?? null,
-          [0, null, 1],
-        ]),
-      ),
+    listChats: async (pageToken?: string) => {
+      const body = await call(rpcs.listChats, [
+        chatsPerPage,
+        pageToken ?? null,
+        [0, null, 1],
+      ])
+      return parseOrThrow('Gemini chat list', () => parseListPage(body))
+    },
 
     /** A chat's turns, oldest first. */
     readChat: async (threadId: string) => {
@@ -279,15 +291,7 @@ export const connectGemini = async ({
       if (pick(body, 1) != null) {
         throw new Error(`Gemini chat ${threadId} has over ${turnLimit} turns`)
       }
-      try {
-        return parseTurns(body)
-      } catch (cause) {
-        if (!(cause instanceof z.ZodError)) throw cause
-        throw new Error(
-          `Gemini chat ${threadId} didn't parse: ${z.prettifyError(cause)}`,
-          { cause },
-        )
-      }
+      return parseOrThrow(`Gemini chat ${threadId}`, () => parseTurns(body))
     },
   }
 }

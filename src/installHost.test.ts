@@ -192,6 +192,7 @@ describe('threadslop install-host', () => {
     ['an entry that is not user@host', ['hive']],
     ['an ssh option', ['-oProxyCommand=sh@hive']],
     ['two entries', ['adwin@hive', 'adwin@crefil']],
+    ['the hostname reserved for Gemini', ['adwin@gemini']],
   ])('prints usage given %s', async (_, args) => {
     const error = spyOn(console, 'error').mockImplementation(() => undefined)
     const host = setup()

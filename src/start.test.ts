@@ -155,6 +155,11 @@ describe('POST /sync with the Host list file', () => {
       'line 3: root@hive repeats the hostname hive',
     ],
     [
+      'the hostname reserved for Gemini',
+      'adwin@Gemini',
+      'line 3: adwin@Gemini uses gemini, reserved for Gemini',
+    ],
+    [
       'a hostname repeated in another case',
       'adwin@hivE',
       'line 3: adwin@hivE repeats the hostname hive',

@@ -1,7 +1,8 @@
 import type { FakeGemini } from '~/testing/fakeGemini'
 import { beforeEach, describe, expect, test } from 'bun:test'
+import { z } from 'zod'
 import { createFakeGemini } from '~/testing/fakeGemini'
-import { createTestApp } from '~/testing/fakeHost'
+import { createFakeHost, createTestApp, testNow } from '~/testing/fakeHost'
 
 let gemini: FakeGemini
 let testApp: ReturnType<typeof createTestApp>
@@ -84,6 +85,199 @@ describe('POST /sync with a Gemini session', () => {
           id: 'r_second:assistant_message',
           text: 'Once a week is enough.',
         }),
+      ],
+    })
+  })
+})
+
+describe('GET /search after a Gemini Sync', () => {
+  test('a hit links to the chat in the Gemini web app', async () => {
+    await sync()
+
+    expect(await getJson('/search?q=fridge&host=gemini')).toEqual({
+      hits: [
+        {
+          host: 'gemini',
+          environmentId: null,
+          threadId: '8f1e2d3c4b5a6978',
+          threadTitle: 'Sourdough starter',
+          project: null,
+          itemType: 'user_message',
+          role: 'user',
+          snippet: 'And in the «fridge»?',
+          createdAt: '2026-11-02T09:00:00.000Z',
+          archived: false,
+          link: 'https://gemini.google.com/app/8f1e2d3c4b5a6978',
+        },
+      ],
+    })
+  })
+})
+
+describe('POST /sync again', () => {
+  test('re-reads only chats whose listed last update changed', async () => {
+    gemini.putChat({
+      id: 'a1b2c3d4e5f60718',
+      title: 'Tokyo trip',
+      updatedAt: '2026-11-03T00:00:00.000Z',
+      turns: [
+        {
+          responseId: 'r_tokyo',
+          prompt: 'Best ramen near Shinjuku?',
+          reply: 'Try Fuunji for tsukemen.',
+          at: '2026-11-03T00:00:00.000Z',
+        },
+      ],
+    })
+    await sync()
+    gemini.requests.length = 0
+    gemini.putChat({
+      id: 'a1b2c3d4e5f60718',
+      title: 'Tokyo trip',
+      updatedAt: '2026-11-04T00:00:00.000Z',
+      turns: [
+        {
+          responseId: 'r_tokyo',
+          prompt: 'Best ramen near Shinjuku?',
+          reply: 'Try Fuunji for tsukemen.',
+          at: '2026-11-03T00:00:00.000Z',
+        },
+        {
+          responseId: 'r_tokyo_2',
+          prompt: 'Is it open on Sundays?',
+          reply: 'Yes, from 11:00.',
+          at: '2026-11-04T00:00:00.000Z',
+        },
+      ],
+    })
+
+    await sync()
+
+    expect(gemini.reads()).toEqual(['a1b2c3d4e5f60718'])
+    expect(await getJson('/search?q=sundays')).toEqual({
+      hits: [expect.objectContaining({ threadId: 'a1b2c3d4e5f60718' })],
+    })
+  })
+
+  test('keeps a chat that is no longer listed', async () => {
+    await sync()
+    gemini.removeChat('8f1e2d3c4b5a6978')
+
+    await sync()
+
+    expect(await getJson('/search?q=fridge')).toEqual({
+      hits: [expect.objectContaining({ threadId: '8f1e2d3c4b5a6978' })],
+    })
+  })
+})
+
+const health = () => getJson('/health')
+
+const geminiRow = async () =>
+  z
+    .object({ hosts: z.array(z.object({ host: z.string() }).loose()) })
+    .parse(await health())
+    .hosts.find(({ host }) => host === 'gemini')
+
+describe('GET /health', () => {
+  test('lists gemini after the Hosts with its last success', async () => {
+    testApp = createTestApp({ hosts: ['hive'], fetch: gemini.fetch })
+    gemini.storeSession(testApp.root)
+    createFakeHost(testApp.root, 'hive')
+
+    await sync()
+
+    expect(await health()).toEqual({
+      syncing: false,
+      hosts: [
+        expect.objectContaining({ host: 'hive' }),
+        {
+          host: 'gemini',
+          environmentId: null,
+          lastSuccessAt: testNow.toISOString(),
+          lastError: null,
+          lastErrorAt: null,
+        },
+      ],
+    })
+  })
+
+  test('omits gemini and Gemini is never reached without a session', async () => {
+    testApp = createTestApp({ hosts: [], fetch: gemini.fetch })
+
+    await sync()
+
+    expect(await health()).toEqual({ syncing: false, hosts: [] })
+    expect(gemini.requests).toEqual([])
+  })
+})
+
+describe('POST /sync when Gemini fails', () => {
+  test('records a signed-out session as a failure', async () => {
+    gemini.signOut()
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({
+        lastSuccessAt: null,
+        lastError: 'signed out; run install-gemini',
+        lastErrorAt: testNow.toISOString(),
+      }),
+    )
+  })
+
+  test('records a throttled answer as a failure and keeps archived Items', async () => {
+    await sync()
+    gemini.putChat({
+      id: '8f1e2d3c4b5a6978',
+      title: 'Sourdough starter',
+      updatedAt: '2026-11-05T00:00:00.000Z',
+      turns: [],
+    })
+    gemini.throttle()
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({
+        lastError: 'Gemini answered MaZiqc without a result; throttled?',
+      }),
+    )
+    expect(await getJson('/search?q=fridge')).toEqual({
+      hits: [expect.objectContaining({ threadId: '8f1e2d3c4b5a6978' })],
+    })
+  })
+
+  test('still syncs the Hosts', async () => {
+    testApp = createTestApp({ hosts: ['hive'], fetch: gemini.fetch })
+    gemini.storeSession(testApp.root)
+    const hive = createFakeHost(testApp.root, 'hive')
+    hive.addThread({
+      id: 'thread-1',
+      title: 'Fix login',
+      updatedAt: '2026-11-01T00:00:00.000Z',
+    })
+    hive.addMessage({
+      id: 'item-1',
+      threadId: 'thread-1',
+      ordinal: 1,
+      role: 'user',
+      text: 'Why does the login redirect loop?',
+      updatedAt: '2026-11-01T00:00:01.000Z',
+    })
+    gemini.signOut()
+
+    await sync()
+
+    expect(await getJson('/search?q=redirect')).toEqual({
+      hits: [expect.objectContaining({ host: 'hive' })],
+    })
+    expect(await health()).toEqual({
+      syncing: false,
+      hosts: [
+        expect.objectContaining({ host: 'hive', lastError: null }),
+        expect.objectContaining({ host: 'gemini', lastSuccessAt: null }),
       ],
     })
   })
