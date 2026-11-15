@@ -323,6 +323,38 @@ describe('POST /sync with images', () => {
     ])
   })
 
+  test('names an uploaded file that is not an image', async () => {
+    gemini.putChat({
+      id: '3e95b801154ef468',
+      title: 'Flashing logs',
+      updatedAt: '2026-05-02T13:57:22.000Z',
+      turns: [
+        {
+          responseId: 'r_logs',
+          prompt: 'here are the full logs',
+          uploads: [
+            { filename: 'esp-web-tools-logs.txt', url: null, slot: 4 },
+            {
+              filename: 'image_20dabe.png',
+              url: 'https://lh3.googleusercontent.com/gg/log-token',
+            },
+          ],
+          reply: 'The chip never enters download mode.',
+          at: '2026-05-02T13:57:22.000Z',
+        },
+      ],
+    })
+
+    await sync()
+
+    expect(await messageTexts('3e95b801154ef468')).toEqual([
+      'here are the full logs\n\n' +
+        'esp-web-tools-logs.txt\n' +
+        '![image_20dabe.png](https://lh3.googleusercontent.com/gg/log-token)',
+      'The chip never enters download mode.',
+    ])
+  })
+
   test('replaces generated-image placeholders in the reply with Markdown images', async () => {
     gemini.putChat({
       id: '3c4d5e6f70819203',
