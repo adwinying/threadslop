@@ -156,11 +156,14 @@ const parseTurn = (turn: unknown) => {
     // `turn[0][0]` is the chat ID.
     responseId: pick(turn, 0, 1),
     prompt: pick(prompt, 0),
-    uploads: listAt(prompt, 4).map((upload) => {
-      // Gemini puts the image at index 3, 4 or both.
-      const image = pick(upload, 3, 0) ?? pick(upload, 4, 0)
-      return { filename: pick(image, 2), url: pick(image, 3) }
-    }),
+    uploads: listAt(prompt, 4)
+      // Gemini sends an empty entry for an upload it kept no image of.
+      .filter((upload) => !(Array.isArray(upload) && upload.length === 0))
+      .map((upload) => {
+        // Gemini puts the image at index 3, 4 or both.
+        const image = pick(upload, 3, 0) ?? pick(upload, 4, 0)
+        return { filename: pick(image, 2), url: pick(image, 3) }
+      }),
     reply: pick(candidate, 1, 0),
     generated: listAt(candidate, 12, 7, 0).map((image) => ({
       filename: pick(image, 0, 3, 2),
