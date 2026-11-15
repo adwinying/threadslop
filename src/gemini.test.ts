@@ -618,7 +618,7 @@ describe('POST /sync when Gemini fails', () => {
   })
 
   test("records Google's error frame when it refuses an rpc", async () => {
-    gemini.rejectRpcs(7)
+    gemini.refuseRpcs(7)
 
     await sync()
 
@@ -626,6 +626,25 @@ describe('POST /sync when Gemini fails', () => {
       expect.objectContaining({
         lastError:
           'Gemini answered MaZiqc without a result: ["wrb.fr","MaZiqc",null,null,null,[7],"generic"]',
+      }),
+    )
+  })
+
+  test('records the start of a response that holds no frames', async () => {
+    testApp = createTestApp({
+      hosts: [],
+      fetch: async (url, init) =>
+        url.includes('/batchexecute')
+          ? new Response(`<html>Sorry${'.'.repeat(300)}</html>`)
+          : gemini.fetch(url, init),
+    })
+    gemini.storeSession(testApp.root)
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({
+        lastError: `Gemini answered MaZiqc without a result: <html>Sorry${'.'.repeat(189)}`,
       }),
     )
   })

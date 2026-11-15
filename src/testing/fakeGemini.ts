@@ -141,10 +141,22 @@ const resultFrame = (rpc: string, body: unknown) => [
   'generic',
 ]
 
+// A result frame with an error code where the body would be.
+const refusalFrame = (rpc: string, code: number) => [
+  'wrb.fr',
+  rpc,
+  null,
+  null,
+  null,
+  [code],
+  'generic',
+]
+
 // What Google sends instead of a result while it throttles.
 const throttledFrames = [
   ['di', 12],
   ['af.httprm', 11, '-4011571396556183958', 4],
+  ['e', 4, null, null, 139],
 ]
 
 const signedInPage = `<script>window.WIZ_global_data = {"SNlM0e":"${accessToken}","cfb2h":"boq_assistant-bard-web-server_20261110.08_p0","FdrFJe":"-4011571396556183958","TuX5cc":"en"};</script>`
@@ -170,7 +182,7 @@ export const createFakeGemini = () => {
   let appPageStatus: number | undefined
   let answersBeforeThrottle = Infinity
   let refusingRotations = false
-  let rejectionCode: number | undefined
+  let refusalCode: number | undefined
 
   const hasSessionCookies = (header: string) =>
     [...accepted].every(([name, value]) =>
@@ -265,12 +277,9 @@ export const createFakeGemini = () => {
       }
       const parsed: unknown = JSON.parse(payload)
       requests.push({ rpc, payload: parsed })
-      if (rejectionCode !== undefined) {
+      if (refusalCode !== undefined) {
         return respond(
-          chunked([
-            ['wrb.fr', rpc, null, null, null, [rejectionCode], 'generic'],
-            ...throttledFrames,
-          ]),
+          chunked([refusalFrame(rpc, refusalCode), ...throttledFrames]),
         )
       }
       return respond(
@@ -337,8 +346,8 @@ export const createFakeGemini = () => {
       answersBeforeThrottle = answered
     },
     /** Refuses every rpc with batchexecute's error frame carrying `code`. */
-    rejectRpcs: (code: number) => {
-      rejectionCode = code
+    refuseRpcs: (code: number) => {
+      refusalCode = code
     },
   }
 }

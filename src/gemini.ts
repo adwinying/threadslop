@@ -218,15 +218,21 @@ const resultOf = (text: string, rpc: string): unknown => {
   const body = pick(result, 2)
   if (typeof body === 'string') return JSON.parse(body)
   // Never read as an empty answer: that would wipe archived Items. Every
-  // response carries `di` and `af.httprm` frames; any other says what failed.
-  const unusual = frames.filter(
-    (frame) => !['di', 'af.httprm'].includes(String(pick(frame, 0))),
-  )
-  throw new Error(
-    unusual.length > 0
-      ? `Gemini answered ${rpc} without a result: ${unusual.map((frame) => JSON.stringify(frame)).join(' ')}`
-      : `Gemini answered ${rpc} without a result; throttled?`,
-  )
+  // response carries `di`, `af.httprm` and `e` frames; any other frame, or a
+  // response without frames, says what failed. Evidence is cut short, as
+  // /health shows it to anyone on the LAN.
+  const routine = ['di', 'af.httprm', 'e']
+  const evidence =
+    frames.length === 0
+      ? [text]
+      : frames
+          .filter((frame) => !routine.includes(String(pick(frame, 0))))
+          .map((frame) => JSON.stringify(frame))
+  const detail =
+    evidence.length > 0
+      ? `: ${evidence.map((item) => item.slice(0, 200)).join(' ')}`
+      : '; throttled?'
+  throw new Error(`Gemini answered ${rpc} without a result${detail}`)
 }
 
 const tokenIn = (page: string, key: string) =>
