@@ -355,6 +355,36 @@ describe('GET /search after a Gemini Sync', () => {
       ],
     })
   })
+
+  test('host=gemini limits hits to Gemini Threads', async () => {
+    testApp = createTestApp({ hosts: ['hive'], fetch: gemini.fetch })
+    gemini.storeSession(testApp.root)
+    const hive = createFakeHost(testApp.root, 'hive')
+    hive.addThread({
+      id: 'thread-1',
+      title: 'Meal prep',
+      updatedAt: '2026-11-01T00:00:00.000Z',
+    })
+    hive.addMessage({
+      id: 'item-1',
+      threadId: 'thread-1',
+      ordinal: 1,
+      role: 'user',
+      text: 'How long does rice keep in the fridge?',
+      updatedAt: '2026-11-01T00:00:01.000Z',
+    })
+    await sync()
+
+    expect(await getJson('/search?q=fridge')).toEqual({
+      hits: [
+        expect.objectContaining({ host: 'gemini' }),
+        expect.objectContaining({ host: 'hive' }),
+      ],
+    })
+    expect(await getJson('/search?q=fridge&host=gemini')).toEqual({
+      hits: [expect.objectContaining({ host: 'gemini' })],
+    })
+  })
 })
 
 describe('POST /sync again', () => {
