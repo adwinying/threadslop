@@ -94,6 +94,221 @@ describe('POST /sync with a Gemini session', () => {
   })
 })
 
+test('POST /sync archives a turn Gemini never answered as its prompt alone', async () => {
+  gemini.putChat({
+    id: '4d5e6f7081920314',
+    title: 'Interrupted',
+    updatedAt: '2026-11-07T10:00:00.000Z',
+    turns: [
+      {
+        responseId: 'r_stopped',
+        prompt: 'Summarise this paper.',
+        reply: '',
+        at: '2026-11-07T10:00:00.000Z',
+      },
+    ],
+  })
+
+  await sync()
+
+  expect(await getJson('/threads/gemini/4d5e6f7081920314?items=all')).toEqual({
+    thread: expect.anything(),
+    items: [expect.objectContaining({ id: 'r_stopped:user_message' })],
+  })
+})
+
+describe('POST /sync with a turn that has reasoning', () => {
+  beforeEach(() => {
+    gemini.putChat({
+      id: '0f9e8d7c6b5a4321',
+      title: 'Prime sieve',
+      updatedAt: '2026-11-03T10:00:00.000Z',
+      turns: [
+        {
+          responseId: 'r_sieve',
+          prompt: 'Fastest way to list primes below a million?',
+          reasoning: 'Trial division is too slow; Eratosthenes fits.',
+          reply: 'Use the sieve of Eratosthenes.',
+          at: '2026-11-03T10:00:00.000Z',
+        },
+      ],
+    })
+  })
+
+  test('archives the reasoning between the prompt and the reply', async () => {
+    await sync()
+
+    expect(await getJson('/threads/gemini/0f9e8d7c6b5a4321?items=all')).toEqual(
+      {
+        thread: expect.anything(),
+        items: [
+          expect.objectContaining({ id: 'r_sieve:user_message' }),
+          expect.objectContaining({
+            id: 'r_sieve:reasoning',
+            type: 'reasoning',
+            role: null,
+            text: 'Trial division is too slow; Eratosthenes fits.',
+          }),
+          expect.objectContaining({ id: 'r_sieve:assistant_message' }),
+        ],
+      },
+    )
+  })
+
+  test('search finds the reasoning only with items=all', async () => {
+    await sync()
+
+    expect(await getJson('/search?q=trial division')).toEqual({ hits: [] })
+    expect(await getJson('/search?q=trial division&items=all')).toEqual({
+      hits: [expect.objectContaining({ itemType: 'reasoning' })],
+    })
+  })
+})
+
+describe('POST /sync with a reply that cites sources', () => {
+  beforeEach(() => {
+    gemini.putChat({
+      id: '1a2b3c4d5e6f7081',
+      title: 'Bread hydration',
+      updatedAt: '2026-11-04T10:00:00.000Z',
+      turns: [
+        {
+          responseId: 'r_hydration',
+          prompt: 'What hydration suits a beginner loaf?',
+          reasoning: 'Lower hydration is easier to shape.',
+          reply: 'Start around 70%.',
+          sources: [
+            {
+              url: 'https://www.kingarthurbaking.com/blog/hydration',
+              title: 'Baker’s percentages explained',
+            },
+            { url: 'https://example.org/untitled-crumb-guide' },
+          ],
+          at: '2026-11-04T10:00:00.000Z',
+        },
+      ],
+    })
+  })
+
+  test('archives the sources after the reply', async () => {
+    await sync()
+
+    expect(await getJson('/threads/gemini/1a2b3c4d5e6f7081?items=all')).toEqual(
+      {
+        thread: expect.anything(),
+        items: [
+          expect.objectContaining({ type: 'user_message' }),
+          expect.objectContaining({ type: 'reasoning' }),
+          expect.objectContaining({ type: 'assistant_message' }),
+          expect.objectContaining({
+            id: 'r_hydration:web_sources',
+            type: 'web_sources',
+            role: null,
+            payload: JSON.stringify({
+              sources: [
+                {
+                  url: 'https://www.kingarthurbaking.com/blog/hydration',
+                  title: 'Baker’s percentages explained',
+                },
+                { url: 'https://example.org/untitled-crumb-guide' },
+              ],
+            }),
+          }),
+        ],
+      },
+    )
+  })
+
+  test('search finds sources by title and URL only with items=all', async () => {
+    await sync()
+
+    expect(await getJson('/search?q=percentages')).toEqual({ hits: [] })
+    expect(await getJson('/search?q=percentages&items=all')).toEqual({
+      hits: [expect.objectContaining({ itemType: 'web_sources' })],
+    })
+    expect(await getJson('/search?q=crumb-guide&items=all')).toEqual({
+      hits: [expect.objectContaining({ itemType: 'web_sources' })],
+    })
+  })
+})
+
+const messageTexts = async (threadId: string) =>
+  z
+    .object({ items: z.array(z.object({ text: z.string() }).loose()) })
+    .parse(await getJson(`/threads/gemini/${threadId}`))
+    .items.map(({ text }) => text)
+
+describe('POST /sync with images', () => {
+  test('appends uploaded images to the prompt as Markdown images', async () => {
+    gemini.putChat({
+      id: '2b3c4d5e6f708192',
+      title: 'Plant ID',
+      updatedAt: '2026-11-05T10:00:00.000Z',
+      turns: [
+        {
+          responseId: 'r_plant',
+          prompt: 'What plant is this?',
+          uploads: [
+            {
+              filename: 'leaf.jpg',
+              url: 'https://lh3.googleusercontent.com/gg/leaf-token',
+            },
+            {
+              filename: 'pot.png',
+              url: 'https://lh3.googleusercontent.com/gg/pot-token',
+            },
+          ],
+          reply: 'A pothos.',
+          at: '2026-11-05T10:00:00.000Z',
+        },
+      ],
+    })
+
+    await sync()
+
+    expect(await messageTexts('2b3c4d5e6f708192')).toEqual([
+      'What plant is this?\n\n' +
+        '![leaf.jpg](https://lh3.googleusercontent.com/gg/leaf-token)\n' +
+        '![pot.png](https://lh3.googleusercontent.com/gg/pot-token)',
+      'A pothos.',
+    ])
+  })
+
+  test('replaces generated-image placeholders in the reply with Markdown images', async () => {
+    gemini.putChat({
+      id: '3c4d5e6f70819203',
+      title: 'Cat poster',
+      updatedAt: '2026-11-06T10:00:00.000Z',
+      turns: [
+        {
+          responseId: 'r_poster',
+          prompt: 'Draw a cat in a spacesuit.',
+          reply:
+            'Here it is:\n\nhttp://googleusercontent.com/image_generation_content/0\n\nWant another?',
+          generated: [
+            {
+              placeholder:
+                'http://googleusercontent.com/image_generation_content/0',
+              filename: 'cat_astronaut.png',
+              url: 'https://lh3.googleusercontent.com/gg/cat-token',
+            },
+          ],
+          at: '2026-11-06T10:00:00.000Z',
+        },
+      ],
+    })
+
+    await sync()
+
+    expect(await messageTexts('3c4d5e6f70819203')).toEqual([
+      'Draw a cat in a spacesuit.',
+      'Here it is:\n\n' +
+        '![cat_astronaut.png](https://lh3.googleusercontent.com/gg/cat-token)' +
+        '\n\nWant another?',
+    ])
+  })
+})
+
 describe('GET /search after a Gemini Sync', () => {
   test('a hit links to the chat in the Gemini web app', async () => {
     await sync()
@@ -331,6 +546,35 @@ describe('POST /sync when Gemini fails', () => {
     expect(await getJson('/search?q=fridge')).toEqual({
       hits: [expect.objectContaining({ threadId: '8f1e2d3c4b5a6978' })],
     })
+  })
+
+  test('fails a chat with more turns than one read returns, saving none of it', async () => {
+    gemini.putChat({
+      id: '5e6f708192031425',
+      title: 'Endless',
+      updatedAt: '2026-11-08T10:00:00.000Z',
+      turns: [
+        {
+          responseId: 'r_endless',
+          prompt: 'Keep going.',
+          reply: 'Going.',
+          at: '2026-11-08T10:00:00.000Z',
+        },
+      ],
+      truncated: true,
+    })
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({
+        lastSuccessAt: null,
+        lastError: 'Gemini chat 5e6f708192031425 has over 200 turns',
+      }),
+    )
+    expect(
+      (await testApp.handle('/threads/gemini/5e6f708192031425')).status,
+    ).toBe(404)
   })
 
   test('still syncs the Hosts', async () => {

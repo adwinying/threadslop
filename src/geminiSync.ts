@@ -19,11 +19,33 @@ const toItem = (turn: Turn, type: string, payload: object) => {
   }
 }
 
+const markdownImage = ({ filename, url }: { filename: string; url: string }) =>
+  `![${filename}](${url})`
+
+/** The prompt, then its uploaded images, like T3's `t3-context://` references. */
+const promptText = ({ prompt, uploads }: Turn) =>
+  [prompt, uploads.map(markdownImage).join('\n')]
+    .filter((part) => part !== '')
+    .join('\n\n')
+
+/** The reply with each generated image in place of its placeholder URL. */
+const replyText = ({ reply, generated }: Turn) =>
+  generated.reduce(
+    (text, image) => text.replaceAll(image.placeholder, markdownImage(image)),
+    reply,
+  )
+
 const toItems = (turn: Turn) => [
-  toItem(turn, 'user_message', { text: turn.prompt }),
+  toItem(turn, 'user_message', { text: promptText(turn) }),
+  ...(turn.reasoning === ''
+    ? []
+    : [toItem(turn, 'reasoning', { text: turn.reasoning })]),
   ...(turn.reply === ''
     ? []
-    : [toItem(turn, 'assistant_message', { text: turn.reply })]),
+    : [toItem(turn, 'assistant_message', { text: replyText(turn) })]),
+  ...(turn.sources.length === 0
+    ? []
+    : [toItem(turn, 'web_sources', { sources: turn.sources })]),
 ]
 
 const toArchivedThread = (chat: ListedChat, turns: Turn[]): ArchivedThread => {

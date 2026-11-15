@@ -53,15 +53,6 @@ const loadSession = (dataDir: string) =>
 /** A chat as the listing reports it. */
 export type ListedChat = { threadId: string; title: string; updatedAt: Date }
 
-/** One prompt and Gemini's reply to it. */
-export type Turn = {
-  responseId: string
-  prompt: string
-  /** Markdown; `''` when Gemini never answered. */
-  reply: string
-  at: Date
-}
-
 const userAgent =
   'Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0'
 const appUrl = 'https://gemini.google.com/app'
@@ -118,24 +109,69 @@ const parseListPage = (body: unknown) => {
   }
 }
 
+const optionalText = z
+  .string()
+  .nullish()
+  .transform((text) => text ?? '')
+
+/** The list at a path; absent means empty. */
+const listAt = (value: unknown, ...path: number[]) =>
+  z
+    .array(z.unknown())
+    .nullish()
+    .parse(pick(value, ...path)) ?? []
+
+const imageSchema = z.object({ filename: z.string(), url: z.string() })
+
 const turnSchema = z.object({
   responseId: z.string().min(1),
   prompt: z.string(),
-  reply: z
-    .string()
-    .nullish()
-    .transform((reply) => reply ?? ''),
+  uploads: z.array(imageSchema),
+  /** Markdown; `''` when Gemini never answered. */
+  reply: optionalText,
+  /** Images Gemini generated, each shown in the reply by its placeholder URL. */
+  generated: z.array(imageSchema.extend({ placeholder: z.string() })),
+  /** `''` when the turn has none. */
+  reasoning: optionalText,
+  /** The web sources the reply cites. */
+  sources: z.array(
+    z.object({
+      url: z.string(),
+      // The title's position is a guess; a wrong guess drops the title only.
+      title: z.string().optional().catch(undefined),
+    }),
+  ),
   at: timestampSchema,
 })
 
-const parseTurn = (turn: unknown): Turn => {
+/** One prompt and Gemini's reply to it. */
+export type Turn = z.infer<typeof turnSchema>
+
+// The positions of everything but the chat ID, prompt, reply, reasoning and
+// time are guesses from the spike's traffic. Each is read here only, so a
+// position Google proves wrong is a one-line fix.
+const parseTurn = (turn: unknown) => {
+  const prompt = pick(turn, 2, 0)
   const candidate = pick(turn, 3, 0, 0)
   return turnSchema.parse({
-    // `turn[0][0]` is the chat ID. The response ID's position next to it is a
-    // guess from the spike's traffic; fix it here if Google proves it wrong.
+    // `turn[0][0]` is the chat ID.
     responseId: pick(turn, 0, 1),
-    prompt: pick(turn, 2, 0, 0),
+    prompt: pick(prompt, 0),
+    uploads: listAt(prompt, 4).map((upload) => ({
+      filename: pick(upload, 3, 0, 2),
+      url: pick(upload, 3, 0, 3),
+    })),
     reply: pick(candidate, 1, 0),
+    generated: listAt(candidate, 12, 7, 0).map((image) => ({
+      filename: pick(image, 0, 3, 2),
+      url: pick(image, 0, 3, 3),
+      placeholder: pick(image, 1, 0),
+    })),
+    reasoning: pick(candidate, 37, 0, 0),
+    sources: listAt(candidate, 2, 1).map((source) => ({
+      url: pick(source, 2, 0, 0),
+      title: pick(source, 2, 0, 1),
+    })),
     at: pick(turn, 4),
   })
 }

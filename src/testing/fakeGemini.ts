@@ -2,12 +2,21 @@ import type { Fetch } from '~/gemini'
 import { z } from 'zod'
 import { saveGeminiSession } from '~/gemini'
 
+type ImageFixture = { filename: string; url: string }
+
 export type TurnFixture = {
   /** The response ID Gemini gives the turn, e.g. `r_…`. */
   responseId: string
   prompt: string
+  /** Images uploaded with the prompt. */
+  uploads?: ImageFixture[]
   /** Markdown; `''` for a turn Gemini never answered. */
   reply: string
+  /** Images Gemini generated, each shown in the reply by its placeholder URL. */
+  generated?: (ImageFixture & { placeholder: string })[]
+  reasoning?: string
+  /** The web sources the reply cites. */
+  sources?: { url: string; title?: string }[]
   /** ISO time of the turn. */
   at: string
 }
@@ -20,6 +29,8 @@ export type ChatFixture = {
   updatedAt: string
   /** Oldest first. */
   turns: TurnFixture[]
+  /** Sets the read's "more turns" marker, as for a chat over the turn limit. */
+  truncated?: boolean
 }
 
 const cookies = {
@@ -54,11 +65,63 @@ const listedChat = ({ id, title, updatedAt }: ChatFixture) => [
   toTimestamp(updatedAt),
 ]
 
+/** An array holding `entries` at their indexes and null elsewhere. */
+const sparse = (entries: Record<number, unknown>) => {
+  const array: unknown[] = Array.from(
+    { length: Math.max(...Object.keys(entries).map(Number)) + 1 },
+    () => null,
+  )
+  for (const [index, value] of Object.entries(entries)) {
+    array[Number(index)] = value
+  }
+  return array
+}
+
+const wireCandidate = (turn: TurnFixture) =>
+  sparse({
+    0: `rc_${turn.responseId}`,
+    1: [turn.reply],
+    ...(turn.sources && {
+      2: [
+        null,
+        turn.sources.map(({ url, title }) => [
+          null,
+          null,
+          [[url, title ?? null]],
+        ]),
+      ],
+    }),
+    ...(turn.generated && {
+      12: sparse({
+        7: [
+          turn.generated.map(({ placeholder, filename, url }) => [
+            [null, null, null, [null, 1, filename, url]],
+            [placeholder],
+          ]),
+        ],
+      }),
+    }),
+    ...(turn.reasoning !== undefined && { 37: [[turn.reasoning]] }),
+  })
+
 const wireTurn = (chatId: string, turn: TurnFixture) => [
   [`c_${chatId}`, turn.responseId],
   null,
-  [[turn.prompt]],
-  [[[`rc_${turn.responseId}`, [turn.reply]]]],
+  [
+    [
+      turn.prompt,
+      null,
+      null,
+      null,
+      turn.uploads?.map(({ filename, url }) => [
+        null,
+        null,
+        null,
+        [[null, 1, filename, url]],
+      ]) ?? null,
+    ],
+  ],
+  [[wireCandidate(turn)]],
   toTimestamp(turn.at),
 ]
 
@@ -145,7 +208,10 @@ export const createFakeGemini = () => {
       const chat = chats.get(id)
       if (!chat) throw new Error(`fake Gemini has no chat ${id}`)
       // Newest first, so the client must order turns itself.
-      return [chat.turns.map((turn) => wireTurn(id, turn)).toReversed(), null]
+      return [
+        chat.turns.map((turn) => wireTurn(id, turn)).toReversed(),
+        chat.truncated ? 'fake-more-turns-token' : null,
+      ]
     }
     throw new Error(`fake Gemini has no rpc ${rpc}`)
   }
