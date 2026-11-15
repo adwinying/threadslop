@@ -9,11 +9,15 @@ export type TurnFixture = {
   responseId: string
   prompt: string
   /**
-   * Images uploaded with the prompt. Gemini puts each in its upload entry at
-   * index 3 or 4, as `slot` picks; 3 when absent. `null` is an empty entry,
-   * which Gemini sends for an upload it kept no image of.
+   * Files uploaded with the prompt. Gemini puts each in its upload entry at
+   * index 3 or 4, as `slot` picks; 3 when absent. A `null` URL is a file that
+   * isn't an image. `null` is an empty entry, which Gemini sends for an upload
+   * it kept no image of.
    */
-  uploads?: ((ImageFixture & { slot?: 3 | 4 }) | null)[]
+  uploads?: (
+    | ({ filename: string; url: string | null } & { slot?: 3 | 4 })
+    | null
+  )[]
   /** Markdown; `''` for a turn Gemini never answered. */
   reply: string
   /** Images Gemini generated, each shown in the reply by its placeholder URL. */
@@ -124,7 +128,8 @@ const wireTurn = (chatId: string, turn: TurnFixture) => [
         if (upload === null) return []
         const { filename, url, slot = 3 } = upload
         const entry: unknown[] = [null, null, null, null]
-        entry[slot] = [[null, 1, filename, url]]
+        // 1 is an image, 3 any other file.
+        entry[slot] = [[null, url === null ? 3 : 1, filename, url]]
         return entry
       }) ?? null,
     ],

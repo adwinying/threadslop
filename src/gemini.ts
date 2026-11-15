@@ -110,7 +110,8 @@ const imageSchema = z.object({ filename: z.string(), url: z.string() })
 const turnSchema = z.object({
   responseId: z.string().min(1),
   prompt: z.string(),
-  uploads: z.array(imageSchema),
+  /** `url` is null for a file that isn't an image. */
+  uploads: z.array(imageSchema.extend({ url: z.string().nullable() })),
   /** Markdown; `''` when Gemini never answered. */
   reply: optionalText,
   /** Images Gemini generated, each shown in the reply by its placeholder URL. */

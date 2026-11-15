@@ -29,9 +29,19 @@ const toItem = (
 const markdownImage = ({ filename, url }: { filename: string; url: string }) =>
   `![${filename}](${url})`
 
-/** The prompt, then its uploaded images, like T3's `t3-context://` references. */
+/**
+ * The prompt, then its uploads, like T3's `t3-context://` references: an image
+ * as a Markdown image, any other file by name.
+ */
 const promptText = ({ prompt, uploads }: Turn) =>
-  [prompt, uploads.map(markdownImage).join('\n')]
+  [
+    prompt,
+    uploads
+      .map(({ filename, url }) =>
+        url === null ? filename : markdownImage({ filename, url }),
+      )
+      .join('\n'),
+  ]
     .filter((part) => part !== '')
     .join('\n\n')
 
