@@ -729,16 +729,16 @@ const putChats = (count: number) =>
   })
 
 describe('POST /sync with a backlog', () => {
-  test('reads the 60 oldest changed chats per Sync until every page is archived', async () => {
+  test('reads the 30 oldest changed chats per Sync until every page is archived', async () => {
     gemini.removeChat(sourdough.id)
     const ids = putChats(250)
 
     await sync()
 
-    expect(gemini.reads()).toEqual(ids.slice(0, 60))
+    expect(gemini.reads()).toEqual(ids.slice(0, 30))
 
-    // 250 chats at 60 per Sync take 5 Syncs.
-    for (let syncs = 1; syncs < 5; syncs++) await sync()
+    // 250 chats at 30 per Sync take 9 Syncs.
+    for (let syncs = 1; syncs < 9; syncs++) await sync()
     gemini.requests.length = 0
     await sync()
 
@@ -754,7 +754,7 @@ describe('POST /sync with a backlog', () => {
   test('once caught up, lists only until the first page without a change', async () => {
     gemini.removeChat(sourdough.id)
     putChats(150)
-    for (let syncs = 0; syncs < 3; syncs++) await sync()
+    for (let syncs = 0; syncs < 5; syncs++) await sync()
     gemini.requests.length = 0
 
     await sync()

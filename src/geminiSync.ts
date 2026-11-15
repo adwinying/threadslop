@@ -81,7 +81,7 @@ const toArchivedThread = (chat: ListedChat, turns: Turn[]): ArchivedThread => {
 
 // Reading more per Sync risks Google throttling or flagging the account. A
 // larger backlog drains over several Syncs.
-const readCap = 60
+const readCap = 30
 
 /**
  * Archives the Threads Gemini lists whose last update changed since they were
