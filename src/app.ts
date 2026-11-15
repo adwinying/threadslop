@@ -49,24 +49,30 @@ export const createApp = ({
   migrate(database)
   const archive = createArchive(database)
 
+  // The Hosts, then Gemini while its session store exists.
+  const sources = () => [
+    ...hosts().map((host) => ({
+      label: host.label,
+      sync: () => syncHost(archive, transport, host),
+    })),
+    ...(hasGeminiSession(dataDir)
+      ? [
+          {
+            label: geminiLabel,
+            sync: () =>
+              syncGemini(archive, { dataDir, fetch, clock, pace: geminiPace }),
+          },
+        ]
+      : []),
+  ]
+
   // Syncs never overlap: callers arriving mid-Sync join it. A Sync never
   // rejects; its failure is logged here and per-Host results land in /health.
   let running: Promise<void> | undefined
   const sync = () => {
     if (running !== undefined) return { started: false, done: running }
     // Read up front, so POST /sync answers a malformed Host list with its error.
-    const sources = hosts().map((host) => ({
-      label: host.label,
-      sync: () => syncHost(archive, transport, host),
-    }))
-    if (hasGeminiSession(dataDir)) {
-      sources.push({
-        label: geminiLabel,
-        sync: () =>
-          syncGemini(archive, { dataDir, fetch, clock, pace: geminiPace }),
-      })
-    }
-    running = syncAll(archive, sources, clock)
+    running = syncAll(archive, sources(), clock)
       .catch(logFailure('Sync'))
       .finally(() => {
         running = undefined
@@ -99,10 +105,7 @@ export const createApp = ({
     .use(
       healthRoutes(() => ({
         syncing: running !== undefined,
-        hosts: archive.health([
-          ...hosts().map(({ label }) => label),
-          ...(hasGeminiSession(dataDir) ? [geminiLabel] : []),
-        ]),
+        hosts: archive.health(sources().map(({ label }) => label)),
       })),
     )
     .use(syncRoutes(() => sync().started))
