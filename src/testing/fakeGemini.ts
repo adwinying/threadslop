@@ -8,8 +8,11 @@ export type TurnFixture = {
   /** The response ID Gemini gives the turn, e.g. `r_…`. */
   responseId: string
   prompt: string
-  /** Images uploaded with the prompt. */
-  uploads?: ImageFixture[]
+  /**
+   * Images uploaded with the prompt. Gemini puts each in its upload entry at
+   * index 3 or 4, as `slot` picks; 3 when absent.
+   */
+  uploads?: (ImageFixture & { slot?: 3 | 4 })[]
   /** Markdown; `''` for a turn Gemini never answered. */
   reply: string
   /** Images Gemini generated, each shown in the reply by its placeholder URL. */
@@ -115,12 +118,11 @@ const wireTurn = (chatId: string, turn: TurnFixture) => [
       null,
       null,
       null,
-      turn.uploads?.map(({ filename, url }) => [
-        null,
-        null,
-        null,
-        [[null, 1, filename, url]],
-      ]) ?? null,
+      turn.uploads?.map(({ filename, url, slot = 3 }) => {
+        const entry: unknown[] = [null, null, null, null]
+        entry[slot] = [[null, 1, filename, url]]
+        return entry
+      }) ?? null,
     ],
   ],
   [[wireCandidate(turn)]],

@@ -280,6 +280,7 @@ describe('POST /sync with images', () => {
             {
               filename: 'pot.png',
               url: 'https://lh3.googleusercontent.com/gg/pot-token',
+              slot: 4,
             },
           ],
           reply: 'A pothos.',
