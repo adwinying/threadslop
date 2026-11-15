@@ -214,7 +214,8 @@ export const createArchive = (db: Database) => {
   }
 
   return {
-    recordHost: (host: string, environmentId: string) => {
+    /** Gemini has no environment ID. */
+    recordHost: (host: string, environmentId: string | null) => {
       upsertHostQuery.run({ host, environmentId })
     },
 
