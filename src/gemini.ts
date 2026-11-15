@@ -226,6 +226,66 @@ const resultOf = (text: string, rpc: string): unknown => {
 const tokenIn = (page: string, key: string) =>
   page.match(new RegExp(`"${key}":\\s*"(.*?)"`))?.[1]
 
+type RequestOptions = Omit<RequestInit, 'headers'> & {
+  headers?: Record<string, string>
+}
+
+/**
+ * Sends requests with the jar's cookies, updating the jar with the cookies
+ * Google sets and calling `onSetCookies` when it did.
+ */
+const createRequest =
+  (jar: Map<string, string>, fetch: Fetch, onSetCookies: () => void) =>
+  async (url: string, init: RequestOptions = {}) => {
+    const response = await fetch(url, {
+      ...init,
+      // A signed-out redirect is judged by the missing token, not followed.
+      redirect: 'manual',
+      headers: {
+        'User-Agent': userAgent,
+        Cookie: [...jar].map(([name, value]) => `${name}=${value}`).join('; '),
+        ...init.headers,
+      },
+    })
+    const setCookies = response.headers.getSetCookie()
+    for (const header of setCookies) {
+      const [pair = ''] = header.split(';')
+      const index = pair.indexOf('=')
+      jar.set(pair.slice(0, index), pair.slice(index + 1))
+    }
+    if (setCookies.length > 0) onSetCookies()
+    return response
+  }
+
+/** Loads the web app for its session tokens; none means signed out. */
+const signIn = async (request: ReturnType<typeof createRequest>) => {
+  const page = await (await request(appUrl, { headers: pageOrigin })).text()
+  const at = tokenIn(page, 'SNlM0e')
+  if (at === undefined) return undefined
+  return {
+    at,
+    bl: tokenIn(page, 'cfb2h'),
+    fsid: tokenIn(page, 'FdrFJe'),
+    hl: tokenIn(page, 'TuX5cc') ?? 'en',
+  }
+}
+
+/**
+ * Runs the sign-in check on cookies not yet stored. Resolves with the cookies
+ * to store, including any Google set meanwhile, or undefined when signed out.
+ */
+export const checkGeminiSignIn = async ({
+  cookies,
+  fetch,
+}: {
+  cookies: Record<string, string>
+  fetch: Fetch
+}) => {
+  const jar = new Map(Object.entries(cookies))
+  const signedIn = await signIn(createRequest(jar, fetch, () => undefined))
+  return signedIn && Object.fromEntries(jar)
+}
+
 /**
  * Signs in to Gemini with the stored session, rotating its cookies when the
  * last rotation is old enough. Throws when the session no longer signs in.
@@ -248,35 +308,13 @@ export const connectGemini = async ({
   const save = () => {
     saveGeminiSession(dataDir, { cookies: Object.fromEntries(jar), rotatedAt })
   }
+  // Saved at once: Google may already reject the cookies they replace.
+  const send = createRequest(jar, fetch, save)
   let sentAny = false
-
-  const request = async (
-    url: string,
-    init: Omit<RequestInit, 'headers'> & {
-      headers?: Record<string, string>
-    } = {},
-  ) => {
+  const request: typeof send = async (url, init) => {
     if (sentAny) await Bun.sleep(pace)
     sentAny = true
-    const response = await fetch(url, {
-      ...init,
-      // A signed-out redirect is judged by the missing token, not followed.
-      redirect: 'manual',
-      headers: {
-        'User-Agent': userAgent,
-        Cookie: [...jar].map(([name, value]) => `${name}=${value}`).join('; '),
-        ...init.headers,
-      },
-    })
-    const setCookies = response.headers.getSetCookie()
-    for (const header of setCookies) {
-      const [pair = ''] = header.split(';')
-      const index = pair.indexOf('=')
-      jar.set(pair.slice(0, index), pair.slice(index + 1))
-    }
-    // Saved at once: Google may already reject the cookies they replace.
-    if (setCookies.length > 0) save()
-    return response
+    return send(url, init)
   }
 
   if (rotatedAt === undefined || +clock() - +rotatedAt >= rotationInterval) {
@@ -296,12 +334,9 @@ export const connectGemini = async ({
     }
   }
 
-  const page = await (await request(appUrl, { headers: pageOrigin })).text()
-  const at = tokenIn(page, 'SNlM0e')
-  if (at === undefined) throw new Error('signed out; run install-gemini')
-  const bl = tokenIn(page, 'cfb2h')
-  const fsid = tokenIn(page, 'FdrFJe')
-  const hl = tokenIn(page, 'TuX5cc') ?? 'en'
+  const tokens = await signIn(request)
+  if (tokens === undefined) throw new Error('signed out; run install-gemini')
+  const { at, bl, fsid, hl } = tokens
 
   const browserSessionId = crypto.randomUUID().toUpperCase()
   let requestId = 100000 + Math.floor(Math.random() * 9000)
