@@ -299,6 +299,30 @@ describe('POST /sync with images', () => {
     ])
   })
 
+  test('keeps the prompt of a turn whose upload entry holds no image', async () => {
+    gemini.putChat({
+      id: '0aea7f7c8466dc9c',
+      title: 'Lost upload',
+      updatedAt: '2026-04-29T13:14:32.000Z',
+      turns: [
+        {
+          responseId: 'r_lost',
+          prompt: 'What does this say?',
+          uploads: [null],
+          reply: 'I can’t see an attachment.',
+          at: '2026-04-29T13:14:32.000Z',
+        },
+      ],
+    })
+
+    await sync()
+
+    expect(await messageTexts('0aea7f7c8466dc9c')).toEqual([
+      'What does this say?',
+      'I can’t see an attachment.',
+    ])
+  })
+
   test('replaces generated-image placeholders in the reply with Markdown images', async () => {
     gemini.putChat({
       id: '3c4d5e6f70819203',
