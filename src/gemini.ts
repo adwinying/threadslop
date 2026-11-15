@@ -269,10 +269,11 @@ const signIn = async (request: ReturnType<typeof createRequest>) => {
     throw new Error(`Gemini answered the app page with HTTP ${response.status}`)
   }
   const page = await response.text()
-  const at = tokenIn(page, 'SNlM0e')
-  if (at === undefined) return undefined
+  // The XSRF token batchexecute requires as its `at` form field.
+  const accessToken = tokenIn(page, 'SNlM0e')
+  if (accessToken === undefined) return undefined
   return {
-    at,
+    accessToken,
     bl: tokenIn(page, 'cfb2h'),
     fsid: tokenIn(page, 'FdrFJe'),
     hl: tokenIn(page, 'TuX5cc') ?? 'en',
@@ -295,6 +296,15 @@ export const checkGeminiSignIn = async ({
   return signedIn && Object.fromEntries(jar)
 }
 
+/** What reaching Gemini with the stored session takes. */
+export type GeminiCollaborators = {
+  dataDir: string
+  fetch: Fetch
+  clock: () => Date
+  /** Milliseconds between requests, so Google doesn't throttle. */
+  pace: number
+}
+
 /**
  * Signs in to Gemini with the stored session, rotating its cookies when the
  * last rotation is old enough. Throws when the session no longer signs in.
@@ -304,13 +314,7 @@ export const connectGemini = async ({
   fetch,
   clock,
   pace,
-}: {
-  dataDir: string
-  fetch: Fetch
-  clock: () => Date
-  /** Milliseconds between requests, so Google doesn't throttle. */
-  pace: number
-}) => {
+}: GeminiCollaborators) => {
   const session = loadSession(dataDir)
   const jar = new Map(Object.entries(session.cookies))
   let { rotatedAt } = session
@@ -345,7 +349,7 @@ export const connectGemini = async ({
 
   const tokens = await signIn(request)
   if (tokens === undefined) throw new Error('signed out; run install-gemini')
-  const { at, bl, fsid, hl } = tokens
+  const { accessToken, bl, fsid, hl } = tokens
 
   const browserSessionId = crypto.randomUUID().toUpperCase()
   let requestId = 100000 + Math.floor(Math.random() * 9000)
@@ -377,7 +381,7 @@ export const connectGemini = async ({
         'x-goog-ext-73010989-jspb': '[0]',
       },
       body: new URLSearchParams({
-        at,
+        at: accessToken,
         'f.req': JSON.stringify([
           [[rpc, JSON.stringify(payload), null, 'generic']],
         ]),
@@ -420,5 +424,3 @@ export const connectGemini = async ({
     },
   }
 }
-
-export type GeminiClient = Awaited<ReturnType<typeof connectGemini>>

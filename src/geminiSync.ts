@@ -1,5 +1,5 @@
 import type { Archive, ArchivedThread } from '~/archive'
-import type { Fetch, ListedChat, Turn } from '~/gemini'
+import type { GeminiCollaborators, ListedChat, Turn } from '~/gemini'
 import { extractSearchText } from '~/extract'
 import { connectGemini, geminiLabel } from '~/gemini'
 
@@ -72,7 +72,8 @@ const toArchivedThread = (chat: ListedChat, turns: Turn[]): ArchivedThread => {
     createdAt: turns[0]?.at.toISOString() ?? updatedAt,
     updatedAt,
     archivedAt: null,
-    // Gemini reports no Item count, so only the time is compared.
+    // Stored like a Host's, but never compared: Gemini lists no Item count,
+    // so a Thread counts as changed by its last update alone.
     signature: { updatedAt, itemCount: items.length, deleted: false },
     items,
   }
@@ -83,18 +84,13 @@ const toArchivedThread = (chat: ListedChat, turns: Turn[]): ArchivedThread => {
 const readCap = 60
 
 /**
- * Archives the chats Gemini lists whose last update changed since they were
- * last read, oldest first and at most `readCap` per Sync. Chats missing from
+ * Archives the Threads Gemini lists whose last update changed since they were
+ * last read, oldest first and at most `readCap` per Sync. Threads missing from
  * the list are kept.
  */
 export const syncGemini = async (
   archive: Archive,
-  collaborators: {
-    dataDir: string
-    fetch: Fetch
-    clock: () => Date
-    pace: number
-  },
+  collaborators: GeminiCollaborators,
 ) => {
   const gemini = await connectGemini(collaborators)
   archive.recordHost(geminiLabel, null)
@@ -103,8 +99,8 @@ export const syncGemini = async (
     stored.get(threadId)?.updatedAt !== updatedAt.toISOString()
 
   // The list runs newest first, so paging stops at the first page without a
-  // changed chat. Reading oldest first keeps that stop correct mid-backlog:
-  // every changed chat left unread is newer than every one read.
+  // changed Thread. Reading oldest first keeps that stop correct mid-backlog:
+  // every changed Thread left unread is newer than every one read.
   const changed: ListedChat[] = []
   let pageToken: string | undefined
   do {
@@ -118,7 +114,7 @@ export const syncGemini = async (
   const toRead = changed
     .toSorted((a, b) => +a.updatedAt - +b.updatedAt)
     .slice(0, readCap)
-  // Each chat commits with its Signature, so an interrupted Sync re-reads
+  // Each Thread commits with its Signature, so an interrupted Sync re-reads
   // only what didn't land.
   for (const chat of toRead) {
     const turns = await gemini.readChat(chat.threadId)

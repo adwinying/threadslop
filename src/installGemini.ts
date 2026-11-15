@@ -94,21 +94,22 @@ export const installGemini = async (
 
   // A failure other than signed out, such as Google answering 503, is no fault
   // of the cookies, so it's reported as is.
-  const signedIn = await checkGeminiSignIn({ cookies, fetch }).catch(
-    (cause: unknown) =>
-      cause instanceof Error ? cause : new Error(String(cause)),
-  )
-  if (signedIn instanceof Error) {
-    console.error(`threadslop: ${signedIn.message}`)
+  let cookiesToStore
+  try {
+    cookiesToStore = await checkGeminiSignIn({ cookies, fetch })
+  } catch (cause) {
+    console.error(
+      `threadslop: ${cause instanceof Error ? cause.message : String(cause)}`,
+    )
     return 1
   }
-  if (signedIn === undefined) {
+  if (cookiesToStore === undefined) {
     console.error("threadslop: those cookies don't sign in to Gemini")
     return 1
   }
   const dataDir = createEnvironment(env).DATA_DIR
   mkdirSync(dataDir, { recursive: true })
-  saveGeminiSession(dataDir, { cookies: signedIn })
+  saveGeminiSession(dataDir, { cookies: cookiesToStore })
   console.log('threadslop: signed in to Gemini, the next Sync pulls it')
   return 0
 }
