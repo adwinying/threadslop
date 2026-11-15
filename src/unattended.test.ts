@@ -85,6 +85,27 @@ describe('POST /sync with a failing Host', () => {
       ],
     })
   })
+
+  test('clears the failure once the Host syncs', async () => {
+    await sync()
+    createFakeHost(testApp.root, 'mayonaca')
+
+    await sync()
+
+    const health = await handle('/health')
+    expect(await health.json()).toEqual(
+      expect.objectContaining({
+        hosts: expect.arrayContaining([
+          expect.objectContaining({
+            host: 'mayonaca',
+            lastSuccessAt: testNow.toISOString(),
+            lastError: null,
+            lastErrorAt: null,
+          }),
+        ]),
+      }),
+    )
+  })
 })
 
 describe('two POST /sync calls during one Sync', () => {
