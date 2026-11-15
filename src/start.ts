@@ -22,7 +22,7 @@ export type StartOptions = {
   listen?: Listen
   /** Replaces ssh, so tests can Sync fake Hosts. */
   transport?: HostTransport
-  /** Replaces the network, so tests can Sync a fake Gemini. */
+  /** Replaces the network, so tests can Sync a fake Gemini or ChatGPT. */
   fetch?: Fetch
 }
 
@@ -47,6 +47,7 @@ export const start = async ({
     transport: transport ?? createSshTransport({ dataDir: config.DATA_DIR }),
     fetch,
     geminiPace: 1000,
+    chatgptPace: 1000,
     clock: () => new Date(),
   }).use(pubkeyRoutes(publicKey))
 

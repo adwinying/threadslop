@@ -143,7 +143,7 @@ export const syncHost = async (
   }
 }
 
-/** A Source to Sync: a Host or Gemini. */
+/** A Source to Sync: a Host, Gemini, or ChatGPT. */
 export type Source = { label: string; sync: () => Promise<void> }
 
 /** Syncs every Source in turn. A failing Source is recorded and skipped. */

@@ -47,14 +47,16 @@ afterEach(() => {
 })
 
 describe('threadslop install-chatgpt', () => {
-  test('stores a token that signs in, readable by its owner only', async () => {
-    const { sessionMode, session, install } = setup()
+  test('stores a token that signs in, readable by its owner only, so the next Sync includes ChatGPT', async () => {
+    const { testApp, sessionMode, install } = setup()
 
     expect(await install(['fake-session-token\r']).exitCode).toBe(0)
-
     expect(sessionMode()).toBe(0o600)
-    expect(JSON.parse(session())).toEqual({
-      cookies: { '__Secure-next-auth.session-token': 'fake-session-token' },
+
+    await testApp.sync()
+    expect(await (await testApp.handle('/health')).json()).toEqual({
+      syncing: false,
+      hosts: [expect.objectContaining({ host: 'chatgpt', lastError: null })],
     })
   })
 
@@ -98,7 +100,7 @@ describe('threadslop install-chatgpt', () => {
 
     expect(await install(['fake-session-token\r']).exitCode).toBe(1)
     expect(error).toHaveBeenCalledWith(
-      'threadslop: Cloudflare challenged /api/auth/session',
+      'threadslop: Cloudflare challenged /api/auth/session with HTTP 403',
     )
   })
 
