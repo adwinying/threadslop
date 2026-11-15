@@ -34,6 +34,10 @@ const requestSchema = z.tuple([
   z.tuple([z.tuple([z.string(), z.string()], z.unknown())]),
 ])
 const readPayloadSchema = z.tuple([z.string().startsWith('c_')], z.unknown())
+const listPayloadSchema = z.tuple(
+  [z.number(), z.string().nullable()],
+  z.unknown(),
+)
 
 /** Gemini's `[seconds, nanos]` timestamp. */
 const toTimestamp = (iso: string) => {
@@ -100,7 +104,7 @@ export const createFakeGemini = () => {
   let unsent: [name: string, value: string][] = []
   let rotations = 0
   let signedIn = true
-  let throttled = false
+  let answersBeforeThrottle = Infinity
   let refusingRotations = false
 
   const hasSessionCookies = (header: string) =>
@@ -124,10 +128,17 @@ export const createFakeGemini = () => {
 
   const answer = (rpc: string, payload: unknown) => {
     if (rpc === 'MaZiqc') {
-      const listed = [...chats.values()].toSorted((a, b) =>
-        b.updatedAt.localeCompare(a.updatedAt),
-      )
-      return [null, null, listed.map(listedChat)]
+      const [perPage, pageToken] = listPayloadSchema.parse(payload)
+      const start = pageToken === null ? 0 : Number(pageToken)
+      const listed = [...chats.values()]
+        .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(start, start + perPage)
+      const next = start + perPage
+      return [
+        null,
+        next < chats.size ? String(next) : null,
+        listed.map(listedChat),
+      ]
     }
     if (rpc === 'hNvQHb') {
       const id = chatIdOf(payload)
@@ -185,7 +196,9 @@ export const createFakeGemini = () => {
       requests.push({ rpc, payload: parsed })
       return respond(
         chunked(
-          throttled ? throttledFrames : [resultFrame(rpc, answer(rpc, parsed))],
+          answersBeforeThrottle-- <= 0
+            ? throttledFrames
+            : [resultFrame(rpc, answer(rpc, parsed))],
         ),
       )
     }
@@ -233,9 +246,12 @@ export const createFakeGemini = () => {
     signOut: () => {
       signedIn = false
     },
-    /** Answers every rpc without a result frame, as Google does when it throttles. */
-    throttle: () => {
-      throttled = true
+    /**
+     * Answers every rpc after the next `answered` without a result frame, as
+     * Google does when it throttles.
+     */
+    throttle: (answered = 0) => {
+      answersBeforeThrottle = answered
     },
   }
 }

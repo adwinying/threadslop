@@ -29,6 +29,8 @@ export type AppCollaborators = {
   transport: HostTransport
   /** Reaches Google for Gemini. */
   fetch: Fetch
+  /** Milliseconds between requests to Google. */
+  geminiPace: number
   clock: () => Date
   /** Registers the cron jobs without letting them fire; tests trigger them. */
   pauseCrons?: boolean
@@ -40,6 +42,7 @@ export const createApp = ({
   hosts,
   transport,
   fetch,
+  geminiPace,
   clock,
   pauseCrons = false,
 }: AppCollaborators) => {
@@ -59,7 +62,8 @@ export const createApp = ({
     if (hasGeminiSession(dataDir)) {
       sources.push({
         label: geminiLabel,
-        sync: () => syncGemini(archive, { dataDir, fetch, clock }),
+        sync: () =>
+          syncGemini(archive, { dataDir, fetch, clock, pace: geminiPace }),
       })
     }
     running = syncAll(archive, sources, clock)

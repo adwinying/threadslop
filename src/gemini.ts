@@ -198,10 +198,13 @@ export const connectGemini = async ({
   dataDir,
   fetch,
   clock,
+  pace,
 }: {
   dataDir: string
   fetch: Fetch
   clock: () => Date
+  /** Milliseconds between requests, so Google doesn't throttle. */
+  pace: number
 }) => {
   const session = loadSession(dataDir)
   const jar = new Map(Object.entries(session.cookies))
@@ -209,6 +212,7 @@ export const connectGemini = async ({
   const save = () => {
     saveGeminiSession(dataDir, { cookies: Object.fromEntries(jar), rotatedAt })
   }
+  let sentAny = false
 
   const request = async (
     url: string,
@@ -216,6 +220,8 @@ export const connectGemini = async ({
       headers?: Record<string, string>
     } = {},
   ) => {
+    if (sentAny) await Bun.sleep(pace)
+    sentAny = true
     const response = await fetch(url, {
       ...init,
       // A signed-out redirect is judged by the missing token, not followed.

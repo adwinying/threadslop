@@ -46,6 +46,7 @@ export const start = async ({
     hosts: () => readHosts(config.DATA_DIR),
     transport: transport ?? createSshTransport({ dataDir: config.DATA_DIR }),
     fetch,
+    geminiPace: 1000,
     clock: () => new Date(),
   }).use(pubkeyRoutes(publicKey))
 

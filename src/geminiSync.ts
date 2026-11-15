@@ -45,26 +45,49 @@ const toArchivedThread = (chat: ListedChat, turns: Turn[]): ArchivedThread => {
   }
 }
 
+// Reading more per Sync risks Google throttling or flagging the account. A
+// larger backlog drains over several Syncs.
+const readCap = 60
+
 /**
  * Archives the chats Gemini lists whose last update changed since they were
- * last read. Chats missing from the list are kept.
+ * last read, oldest first and at most `readCap` per Sync. Chats missing from
+ * the list are kept.
  */
 export const syncGemini = async (
   archive: Archive,
-  collaborators: { dataDir: string; fetch: Fetch; clock: () => Date },
+  collaborators: {
+    dataDir: string
+    fetch: Fetch
+    clock: () => Date
+    pace: number
+  },
 ) => {
   const gemini = await connectGemini(collaborators)
   archive.recordHost(geminiLabel, null)
   const stored = archive.signatures(geminiLabel)
+  const isChanged = ({ threadId, updatedAt }: ListedChat) =>
+    stored.get(threadId)?.updatedAt !== updatedAt.toISOString()
 
-  const { chats } = await gemini.listChats()
-  const changed = chats.filter(
-    ({ threadId, updatedAt }) =>
-      stored.get(threadId)?.updatedAt !== updatedAt.toISOString(),
-  )
+  // The list runs newest first, so paging stops at the first page without a
+  // changed chat. Reading oldest first keeps that stop correct mid-backlog:
+  // every changed chat left unread is newer than every one read.
+  const changed: ListedChat[] = []
+  let pageToken: string | undefined
+  do {
+    const page = await gemini.listChats(pageToken)
+    const pageChanged = page.chats.filter(isChanged)
+    if (pageChanged.length === 0) break
+    changed.push(...pageChanged)
+    pageToken = page.nextPageToken
+  } while (pageToken !== undefined)
+
+  const toRead = changed
+    .toSorted((a, b) => +a.updatedAt - +b.updatedAt)
+    .slice(0, readCap)
   // Each chat commits with its Signature, so an interrupted Sync re-reads
   // only what didn't land.
-  for (const chat of changed) {
+  for (const chat of toRead) {
     const turns = await gemini.readChat(chat.threadId)
     archive.saveThreads(geminiLabel, [toArchivedThread(chat, turns)])
   }

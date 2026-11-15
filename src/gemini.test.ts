@@ -1,10 +1,30 @@
-import type { FakeGemini } from '~/testing/fakeGemini'
+import type { ChatFixture, FakeGemini } from '~/testing/fakeGemini'
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { chmodSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { createFakeGemini } from '~/testing/fakeGemini'
 import { createFakeHost, createTestApp, testNow } from '~/testing/fakeHost'
+
+const sourdough: ChatFixture = {
+  id: '8f1e2d3c4b5a6978',
+  title: 'Sourdough starter',
+  updatedAt: '2026-11-02T09:00:00.000Z',
+  turns: [
+    {
+      responseId: 'r_first',
+      prompt: 'How often should I feed a sourdough starter?',
+      reply: 'Feed it **once a day** at room temperature.',
+      at: '2026-11-01T08:00:00.000Z',
+    },
+    {
+      responseId: 'r_second',
+      prompt: 'And in the fridge?',
+      reply: 'Once a week is enough.',
+      at: '2026-11-02T09:00:00.000Z',
+    },
+  ],
+}
 
 let gemini: FakeGemini
 let testApp: ReturnType<typeof createTestApp>
@@ -14,25 +34,7 @@ beforeEach(() => {
   testApp = createTestApp({ hosts: [], fetch: gemini.fetch })
   gemini.storeSession(testApp.root)
 
-  gemini.putChat({
-    id: '8f1e2d3c4b5a6978',
-    title: 'Sourdough starter',
-    updatedAt: '2026-11-02T09:00:00.000Z',
-    turns: [
-      {
-        responseId: 'r_first',
-        prompt: 'How often should I feed a sourdough starter?',
-        reply: 'Feed it **once a day** at room temperature.',
-        at: '2026-11-01T08:00:00.000Z',
-      },
-      {
-        responseId: 'r_second',
-        prompt: 'And in the fridge?',
-        reply: 'Once a week is enough.',
-        at: '2026-11-02T09:00:00.000Z',
-      },
-    ],
-  })
+  gemini.putChat(sourdough)
 })
 
 const sync = () => testApp.sync()
@@ -170,6 +172,18 @@ describe('POST /sync again', () => {
     expect(await getJson('/search?q=fridge')).toEqual({
       hits: [expect.objectContaining({ threadId: '8f1e2d3c4b5a6978' })],
     })
+  })
+
+  test("keeps an unlisted chat's Signature, so it isn't re-read when listed again", async () => {
+    await sync()
+    gemini.removeChat(sourdough.id)
+    await sync()
+    gemini.requests.length = 0
+    gemini.putChat(sourdough)
+
+    await sync()
+
+    expect(gemini.reads()).toEqual([])
   })
 })
 
@@ -350,5 +364,111 @@ describe('POST /sync when Gemini fails', () => {
         expect.objectContaining({ host: 'gemini', lastSuccessAt: null }),
       ],
     })
+  })
+})
+
+/** `count` one-turn chats, chat 0 the oldest, a minute apart. */
+const putChats = (count: number) =>
+  Array.from({ length: count }, (_, index) => {
+    const id = `backlog${String(index).padStart(4, '0')}`
+    const at = new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString()
+    gemini.putChat({
+      id,
+      title: `Chat ${index}`,
+      updatedAt: at,
+      turns: [
+        { responseId: `r_${id}`, prompt: `Question ${index}`, reply: '', at },
+      ],
+    })
+    return id
+  })
+
+describe('POST /sync with a backlog', () => {
+  test('reads the 60 oldest changed chats per Sync until every page is archived', async () => {
+    gemini.removeChat(sourdough.id)
+    const ids = putChats(250)
+
+    await sync()
+
+    expect(gemini.reads()).toEqual(ids.slice(0, 60))
+
+    // 250 chats at 60 per Sync take 5 Syncs.
+    for (let syncs = 1; syncs < 5; syncs++) await sync()
+    gemini.requests.length = 0
+    await sync()
+
+    expect(gemini.reads()).toEqual([])
+    for (const id of [ids[0], ids[249]]) {
+      expect(await testApp.handle(`/threads/gemini/${id}`)).toHaveProperty(
+        'status',
+        200,
+      )
+    }
+  })
+
+  test('once caught up, lists only until the first page without a change', async () => {
+    gemini.removeChat(sourdough.id)
+    putChats(150)
+    for (let syncs = 0; syncs < 3; syncs++) await sync()
+    gemini.requests.length = 0
+
+    await sync()
+
+    expect(gemini.requests.map(({ rpc }) => rpc)).toEqual(['MaZiqc'])
+
+    gemini.requests.length = 0
+    gemini.putChat({
+      id: 'fresh',
+      title: 'Fresh chat',
+      updatedAt: '2026-11-10T00:00:00.000Z',
+      turns: [],
+    })
+
+    await sync()
+
+    expect(gemini.requests.map(({ rpc }) => rpc)).toEqual([
+      'MaZiqc',
+      'MaZiqc',
+      'hNvQHb',
+    ])
+  })
+})
+
+describe('POST /sync throttled while paging', () => {
+  test('fails instead of treating the empty page as the last', async () => {
+    putChats(150)
+    gemini.throttle(1)
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({
+        lastError: 'Gemini answered MaZiqc without a result; throttled?',
+      }),
+    )
+    expect(gemini.reads()).toEqual([])
+  })
+})
+
+describe('POST /sync pacing', () => {
+  test('spaces requests to Google by the configured pace', async () => {
+    const sentAt: number[] = []
+    testApp = createTestApp({
+      hosts: [],
+      fetch: (url, init) => {
+        sentAt.push(performance.now())
+        return gemini.fetch(url, init)
+      },
+      geminiPace: 50,
+    })
+    gemini.storeSession(testApp.root)
+
+    await sync()
+
+    // Rotation, the app page, the list and one read.
+    expect(sentAt).toHaveLength(4)
+    const gaps = sentAt.slice(1).map((at, index) => at - (sentAt[index] ?? at))
+    // Timers can fire a fraction of a millisecond early.
+    for (const gap of gaps) expect(gap).toBeGreaterThanOrEqual(49)
   })
 })
