@@ -1,57 +1,15 @@
 // `threadslop install-gemini`, run in the container with `docker exec -it`:
 // reads Adwin's Google session cookies at a tty prompt that doesn't echo them,
 // checks they sign in to Gemini, then stores them as the session store.
-import type { Fetch } from '~/gemini'
+import type { Terminal } from '~/terminal'
+import type { Fetch } from '~/web'
 import { mkdirSync } from 'node:fs'
 import { createEnvironment } from '~/env'
 import { checkGeminiSignIn, saveGeminiSession } from '~/gemini'
-
-/** The tty the cookies are typed at. Tests swap in a stand-in. */
-type Terminal = {
-  input: NodeJS.ReadableStream & {
-    isTTY?: boolean
-    setRawMode?: (mode: boolean) => unknown
-  }
-  output: NodeJS.WritableStream
-}
+import { hiddenPrompt } from '~/terminal'
 
 // Firefox's: Chromium's device-bound sessions cut its cookies to a few hours.
 const cookieNames = ['__Secure-1PSID', '__Secure-1PSIDTS']
-
-const enter = new Set(['\r', '\n'])
-const cancel = new Set(['\u0003', '\u0004']) // Ctrl-C, Ctrl-D
-const erase = new Set(['\u007f', '\b'])
-
-/**
- * Reads a line at the tty in raw mode, so the tty doesn't echo it. Resolves
- * with undefined when cancelled.
- */
-const promptHidden = (
-  question: string,
-  { input, output }: Terminal,
-  setRawMode: (mode: boolean) => unknown,
-) =>
-  new Promise<string | undefined>((resolve) => {
-    let answer = ''
-    const finish = (result: string | undefined) => {
-      input.off('data', onData)
-      setRawMode(false)
-      input.pause()
-      output.write('\n')
-      resolve(result)
-    }
-    const onData = (chunk: Buffer | string) => {
-      for (const char of String(chunk)) {
-        if (enter.has(char)) return finish(answer.trim())
-        if (cancel.has(char)) return finish(undefined)
-        answer = erase.has(char) ? answer.slice(0, -1) : answer + char
-      }
-    }
-    setRawMode(true)
-    input.on('data', onData)
-    input.resume()
-    output.write(question)
-  })
 
 type InstallGeminiOptions = Partial<Terminal> & {
   env?: Record<string, string | undefined>
@@ -73,9 +31,8 @@ export const installGemini = async (
     console.error('Usage: threadslop install-gemini')
     return 1
   }
-  const { setRawMode } = input
-  // Without a tty, nothing here can stop the cookies being echoed.
-  if (!input.isTTY || setRawMode === undefined) {
+  const prompt = hiddenPrompt({ input, output })
+  if (prompt === undefined) {
     console.error(
       'threadslop: install-gemini needs a tty; run it with docker exec -it',
     )
@@ -83,11 +40,7 @@ export const installGemini = async (
   }
   const cookies: Record<string, string> = {}
   for (const name of cookieNames) {
-    const value = await promptHidden(
-      `${name} (from Firefox): `,
-      { input, output },
-      setRawMode.bind(input),
-    )
+    const value = await prompt(`${name} (from Firefox): `)
     if (value === undefined) return 130
     cookies[name] = value
   }

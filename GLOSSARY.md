@@ -1,11 +1,11 @@
 # threadslop
 
-Collects T3 Code conversations from every machine, plus Adwin's Gemini chats, into one searchable archive on nas, so Adwin and agents can recall past work.
+Collects T3 Code conversations from every machine, plus Adwin's Gemini and ChatGPT chats, into one searchable archive on nas, so Adwin and agents can recall past work.
 
 ## Language
 
 **Source**:
-Somewhere threadslop pulls Threads from: a Host, or Gemini.
+Somewhere threadslop pulls Threads from: a Host, Gemini, or ChatGPT.
 _Avoid_: Provider, origin, account
 
 **Host**:
@@ -16,8 +16,12 @@ _Avoid_: Machine, node, client
 The Source holding Adwin's chats in the gemini.google.com web app.
 _Avoid_: Bard, Gemini API
 
+**ChatGPT**:
+The Source holding Adwin's chats in the chatgpt.com web app.
+_Avoid_: OpenAI, ChatGPT API, Codex
+
 **Thread**:
-One conversation, identified by its Source and ID: a T3 Code thread or a Gemini chat.
+One conversation, identified by its Source and ID: a T3 Code thread, a Gemini chat, or a ChatGPT chat.
 _Avoid_: Conversation, chat, session
 
 **Item**:

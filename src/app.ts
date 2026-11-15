@@ -1,9 +1,11 @@
 import type { Database } from 'bun:sqlite'
-import type { Fetch } from '~/gemini'
 import type { Host, HostTransport } from '~/hosts'
+import type { Fetch } from '~/web'
 import { cron } from '@elysiajs/cron'
 import { Elysia } from 'elysia'
 import { createArchive, migrate } from '~/archive'
+import { chatgptLabel, hasChatGPTSession } from '~/chatgpt'
+import { syncChatGPT } from '~/chatgptSync'
 import { geminiLabel, hasGeminiSession } from '~/gemini'
 import { syncGemini } from '~/geminiSync'
 import { healthRoutes } from '~/routes/health'
@@ -22,15 +24,17 @@ const logFailure = (job: string) => (error: unknown) => {
 export type AppCollaborators = {
   /** Opened with `{ strict: true }`, so queries bind `$name` params by name. */
   database: Database
-  /** Where the Snapshot is written and the Gemini session is stored. */
+  /** Where the Snapshot is written and the Gemini and ChatGPT sessions are stored. */
   dataDir: string
   /** Read at the start of every Sync and `/health`; throws if invalid. */
   hosts: () => Host[]
   transport: HostTransport
-  /** Reaches Google for Gemini. */
+  /** Reaches Google for Gemini and chatgpt.com for ChatGPT. */
   fetch: Fetch
   /** Milliseconds between requests to Google. */
   geminiPace: number
+  /** Milliseconds between requests to chatgpt.com. */
+  chatgptPace: number
   clock: () => Date
   /** Registers the cron jobs without letting them fire; tests trigger them. */
   pauseCrons?: boolean
@@ -43,13 +47,14 @@ export const createApp = ({
   transport,
   fetch,
   geminiPace,
+  chatgptPace,
   clock,
   pauseCrons = false,
 }: AppCollaborators) => {
   migrate(database)
   const archive = createArchive(database)
 
-  // The Hosts, then Gemini while its session store exists.
+  // The Hosts, then Gemini and ChatGPT while their session stores exist.
   const sources = () => [
     ...hosts().map((host) => ({
       label: host.label,
@@ -61,6 +66,14 @@ export const createApp = ({
             label: geminiLabel,
             sync: () =>
               syncGemini(archive, { dataDir, fetch, clock, pace: geminiPace }),
+          },
+        ]
+      : []),
+    ...(hasChatGPTSession(dataDir)
+      ? [
+          {
+            label: chatgptLabel,
+            sync: () => syncChatGPT({ dataDir, fetch, pace: chatgptPace }),
           },
         ]
       : []),

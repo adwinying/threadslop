@@ -1,12 +1,8 @@
-import {
-  existsSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import type { Fetch } from '~/web'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { createRequest, saveSessionStore } from '~/web'
 
 // Everything about Google's undocumented wire format lives in this module. The
 // positions were observed in the web app's traffic, not documented, so parsing
@@ -19,9 +15,6 @@ export const geminiLabel = 'gemini'
 /** The web URL of a Gemini chat, by Thread ID. */
 export const geminiChatUrl = (threadId: string) =>
   `https://gemini.google.com/app/${threadId}`
-
-/** The subset of `fetch` Gemini needs; tests inject a fake Gemini. */
-export type Fetch = (url: string, init: RequestInit) => Promise<Response>
 
 const sessionSchema = z.object({
   cookies: z.record(z.string(), z.string()),
@@ -37,14 +30,8 @@ const sessionFile = (dataDir: string) => join(dataDir, 'gemini-session.json')
 export const hasGeminiSession = (dataDir: string) =>
   existsSync(sessionFile(dataDir))
 
-/** Writes the session store atomically, readable by its owner only. */
 export const saveGeminiSession = (dataDir: string, session: GeminiSession) => {
-  const file = sessionFile(dataDir)
-  const temporary = `${file}.tmp`
-  // A file left by an interrupted save would keep its mode.
-  rmSync(temporary, { force: true })
-  writeFileSync(temporary, JSON.stringify(session), { mode: 0o600 })
-  renameSync(temporary, file)
+  saveSessionStore(sessionFile(dataDir), session)
 }
 
 const loadSession = (dataDir: string) =>
@@ -53,8 +40,6 @@ const loadSession = (dataDir: string) =>
 /** A chat as the listing reports it. */
 export type ListedChat = { threadId: string; title: string; updatedAt: Date }
 
-const userAgent =
-  'Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0'
 const appUrl = 'https://gemini.google.com/app'
 const rotateUrl = 'https://accounts.google.com/RotateCookies'
 const rotationInterval = 10 * 60 * 1000
@@ -244,37 +229,6 @@ class UnloadableChatError extends Error {}
 const tokenIn = (page: string, key: string) =>
   page.match(new RegExp(`"${key}":\\s*"(.*?)"`))?.[1]
 
-type RequestOptions = Omit<RequestInit, 'headers'> & {
-  headers?: Record<string, string>
-}
-
-/**
- * Sends requests with the jar's cookies, updating the jar with the cookies
- * Google sets and calling `onSetCookies` when it did.
- */
-const createRequest =
-  (jar: Map<string, string>, fetch: Fetch, onSetCookies: () => void) =>
-  async (url: string, init: RequestOptions = {}) => {
-    const response = await fetch(url, {
-      ...init,
-      // A signed-out redirect is judged by the missing token, not followed.
-      redirect: 'manual',
-      headers: {
-        'User-Agent': userAgent,
-        Cookie: [...jar].map(([name, value]) => `${name}=${value}`).join('; '),
-        ...init.headers,
-      },
-    })
-    const setCookies = response.headers.getSetCookie()
-    for (const header of setCookies) {
-      const [pair = ''] = header.split(';')
-      const index = pair.indexOf('=')
-      jar.set(pair.slice(0, index), pair.slice(index + 1))
-    }
-    if (setCookies.length > 0) onSetCookies()
-    return response
-  }
-
 /**
  * Loads the web app for its session tokens. Resolves with undefined when
  * signed out: Google redirects to sign-in or serves a page without the tokens.
@@ -310,7 +264,7 @@ export const checkGeminiSignIn = async ({
   fetch: Fetch
 }) => {
   const jar = new Map(Object.entries(cookies))
-  const signedIn = await signIn(createRequest(jar, fetch, () => undefined))
+  const signedIn = await signIn(createRequest({ jar, fetch }))
   return signedIn && Object.fromEntries(jar)
 }
 
@@ -340,13 +294,7 @@ export const connectGemini = async ({
     saveGeminiSession(dataDir, { cookies: Object.fromEntries(jar), rotatedAt })
   }
   // Saved at once: Google may already reject the cookies they replace.
-  const send = createRequest(jar, fetch, save)
-  let sentAny = false
-  const request: typeof send = async (url, init) => {
-    if (sentAny) await Bun.sleep(pace)
-    sentAny = true
-    return send(url, init)
-  }
+  const request = createRequest({ jar, fetch, onSetCookies: save, pace })
 
   if (rotatedAt === undefined || +clock() - +rotatedAt >= rotationInterval) {
     const rotation = await request(rotateUrl, {
