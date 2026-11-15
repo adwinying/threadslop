@@ -119,7 +119,10 @@ export const createArchive = (db: Database) => {
   )
   const recordSuccessQuery = db.query(
     `INSERT INTO hosts (label, last_success_at) VALUES ($host, $at)
-     ON CONFLICT (label) DO UPDATE SET last_success_at = excluded.last_success_at`,
+     ON CONFLICT (label) DO UPDATE SET
+       last_success_at = excluded.last_success_at,
+       last_error = NULL,
+       last_error_at = NULL`,
   )
   const recordFailureQuery = db.query(
     `INSERT INTO hosts (label, last_error, last_error_at)
