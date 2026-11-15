@@ -631,7 +631,7 @@ describe('POST /sync when Gemini fails', () => {
     expect(await geminiRow()).toEqual(
       expect.objectContaining({
         lastError: expect.stringContaining(
-          `without a result: ["wrb.fr","MaZiqc",null,null,null,[13,null,[["type.googleapis.com/assistant.boq.bard.application.BardErrorInfo",[1096,null,"Couldn't load conversation.`,
+          `Gemini answered MaZiqc without a result: ["wrb.fr","MaZiqc",null,null,null,[13,null,[["type.googleapis.com/assistant.boq.bard.application.BardErrorInfo",[1096,null,"Couldn't load conversation.`,
         ),
       }),
     )
@@ -809,6 +809,31 @@ describe('POST /sync with a chat Google cannot load', () => {
     )
     // The oldest changed chats of page 1, the newest 100.
     expect(gemini.reads()).toEqual(ids.slice(50, 80))
+  })
+
+  test('fails on a later page Google refuses for another reason', async () => {
+    putChats(150)
+    let calls = 0
+    testApp = createTestApp({
+      hosts: [],
+      fetch: async (url, init) =>
+        url.includes('/batchexecute') && ++calls === 2
+          ? new Response(
+              `)]}'\n\n${JSON.stringify([['wrb.fr', 'MaZiqc', null, null, null, [7], 'generic']])}\n`,
+            )
+          : gemini.fetch(url, init),
+    })
+    gemini.storeSession(testApp.root)
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({
+        lastSuccessAt: null,
+        lastError:
+          'Gemini answered MaZiqc without a result: ["wrb.fr","MaZiqc",null,null,null,[7],"generic"]',
+      }),
+    )
   })
 })
 

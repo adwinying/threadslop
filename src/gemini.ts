@@ -233,11 +233,13 @@ const resultOf = (text: string, rpc: string): unknown => {
       ? `: ${evidence.map((item) => item.slice(0, 200)).join(' ')}`
       : '; throttled?'
   const message = `Gemini answered ${rpc} without a result${detail}`
-  throw result === undefined ? new Error(message) : new GeminiRefusal(message)
+  // BardErrorInfo 1096: "Couldn't load conversation".
+  const unloadable = pick(result, 5, 2, 0, 1, 0) === 1096
+  throw unloadable ? new UnloadableChatError(message) : new Error(message)
 }
 
-/** Google answered the rpc with an error in place of its result. */
-class GeminiRefusal extends Error {}
+/** Google refused the rpc because a chat it touches can't be loaded. */
+class UnloadableChatError extends Error {}
 
 const tokenIn = (page: string, key: string) =>
   page.match(new RegExp(`"${key}":\\s*"(.*?)"`))?.[1]
@@ -420,9 +422,12 @@ export const connectGemini = async ({
         ])
         return parseOrThrow('Gemini chat list', () => parseListPage(body))
       } catch (error) {
-        // Google refuses every page from a chat it can't load onward, so a
-        // later page it refuses ends the list. Throttles still fail.
-        if (pageToken === undefined || !(error instanceof GeminiRefusal)) {
+        // Google refuses every page from a chat it can't load onward, so such
+        // a refusal of a later page ends the list. Anything else still fails.
+        if (
+          pageToken === undefined ||
+          !(error instanceof UnloadableChatError)
+        ) {
           throw error
         }
         console.warn(`${error.message}; the list ends at the page before`)
