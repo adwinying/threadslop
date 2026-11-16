@@ -2,7 +2,7 @@ import type { Fetch } from '~/web'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { createRequest, saveSessionStore } from '~/web'
+import { createRequest, parseOrThrow, saveSessionStore } from '~/web'
 
 // Everything about chatgpt.com's undocumented backend API lives in this
 // module. Its shapes were checked against real responses in the spike (#36),
@@ -112,9 +112,6 @@ const listPageSchema = z.object({
       })),
   ),
 })
-
-/** A chat as the list reports it. */
-export type ListedChat = z.infer<typeof listPageSchema>['items'][number]
 
 /** Epoch seconds, as a conversation gives its times. */
 const epochSchema = z.number().transform((seconds) => new Date(seconds * 1000))
@@ -351,18 +348,12 @@ const citedReply = (text: string, metadata: unknown) => {
   }
 }
 
-/** An Item a message becomes, before its Thread numbers it. */
-type ItemDraft = { type: string; payload: object }
-
 /**
  * The Items a message on the visible branch becomes, by what it holds. One the
  * conversation hides becomes none. A tool call takes its output from `results`,
  * the tool messages right after it.
  */
-const toItemDrafts = (
-  message: ChatGPTMessage,
-  results: ChatGPTMessage[],
-): ItemDraft[] => {
+const toItemDrafts = (message: ChatGPTMessage, results: ChatGPTMessage[]) => {
   if (message.metadata.is_visually_hidden_from_conversation) return []
   const { role } = message.author
   const { content_type } = message.content
@@ -449,24 +440,10 @@ const parseChat = (body: unknown) => {
     drafts: branch.flatMap((message, index) =>
       toItemDrafts(message, resultsAfter(branch, index)).map((draft) => ({
         ...draft,
-        messageId: message.id,
-        at: message.create_time,
+        key: message.id,
+        at: message.create_time ?? conversation.create_time,
       })),
     ),
-  }
-}
-
-export type Chat = ReturnType<typeof parseChat>
-
-/** Runs a parser, naming what didn't parse when ChatGPT's format changed. */
-const parseOrThrow = <T>(what: string, parse: () => T) => {
-  try {
-    return parse()
-  } catch (cause) {
-    if (!(cause instanceof Error)) throw cause
-    const detail =
-      cause instanceof z.ZodError ? z.prettifyError(cause) : cause.message
-    throw new Error(`${what} didn't parse: ${detail}`, { cause })
   }
 }
 

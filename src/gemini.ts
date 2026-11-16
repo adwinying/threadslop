@@ -1,8 +1,8 @@
-import type { Fetch } from '~/web'
+import type { Fetch, ListedChat } from '~/web'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { createRequest, saveSessionStore } from '~/web'
+import { createRequest, parseOrThrow, saveSessionStore } from '~/web'
 
 // Everything about Google's undocumented wire format lives in this module. The
 // positions were observed in the web app's traffic, not documented, so parsing
@@ -36,9 +36,6 @@ export const saveGeminiSession = (dataDir: string, session: GeminiSession) => {
 
 const loadSession = (dataDir: string) =>
   sessionSchema.parse(JSON.parse(readFileSync(sessionFile(dataDir), 'utf8')))
-
-/** A chat as the listing reports it. */
-export type ListedChat = { threadId: string; title: string; updatedAt: Date }
 
 const appUrl = 'https://gemini.google.com/app'
 const rotateUrl = 'https://accounts.google.com/RotateCookies'
@@ -169,18 +166,6 @@ const parseTurnPage = (body: unknown) => ({
   turns: z.array(z.unknown()).parse(pick(body, 0)).map(parseTurn),
   nextPageToken: z.string().nullish().parse(pick(body, 1)) ?? undefined,
 })
-
-/** Runs a parser, naming what didn't parse when Google's format changed. */
-const parseOrThrow = <T>(what: string, parse: () => T) => {
-  try {
-    return parse()
-  } catch (cause) {
-    if (!(cause instanceof z.ZodError)) throw cause
-    throw new Error(`${what} didn't parse: ${z.prettifyError(cause)}`, {
-      cause,
-    })
-  }
-}
 
 /** Parses a line of JSON, or gives undefined when it isn't JSON. */
 const parseLine = (line: string): unknown => {

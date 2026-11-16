@@ -1,10 +1,27 @@
 import { renameSync, rmSync, writeFileSync } from 'node:fs'
+import { z } from 'zod'
 
 // Reaching a web app as Adwin, the way Gemini and ChatGPT are Synced: requests
-// carrying his session cookies, and the session store that keeps them.
+// carrying his session cookies, the session store that keeps them, and parsing
+// what the web app answers.
 
 /** The subset of `fetch` the web apps need; tests inject fakes. */
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>
+
+/** A chat as a web app lists it. */
+export type ListedChat = { threadId: string; title: string; updatedAt: Date }
+
+/** Runs a parser, naming what didn't parse when a web app's format changed. */
+export const parseOrThrow = <T>(what: string, parse: () => T) => {
+  try {
+    return parse()
+  } catch (cause) {
+    if (!(cause instanceof Error)) throw cause
+    const detail =
+      cause instanceof z.ZodError ? z.prettifyError(cause) : cause.message
+    throw new Error(`${what} didn't parse: ${detail}`, { cause })
+  }
+}
 
 /** Writes a session store atomically, readable by its owner only. */
 export const saveSessionStore = (file: string, session: object) => {
