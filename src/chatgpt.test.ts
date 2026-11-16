@@ -732,7 +732,7 @@ describe('POST /sync with tool calls', () => {
         payload: {
           toolName: 'web.run',
           input: 'rounded serif bakery font\nfree bakery logo fonts',
-          output: null,
+          output: 'Bakery fonts\nhttps://example.com/fonts',
         },
       },
       {

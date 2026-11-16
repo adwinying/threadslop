@@ -217,22 +217,42 @@ const toolInput = (call: ChatGPTMessage) =>
     .map(({ q }) => q)
     .join('\n')
 
+const sourceSchema = z.object({ url: z.string(), title: z.string().optional() })
+
+/** The pages a search returned, listed beside a web call's result or reply. */
+const searchResultGroupsSchema = z
+  .array(z.object({ entries: z.array(sourceSchema) }))
+  .default([])
+
+// A web call's result leaves its text empty and lists its pages here.
+const webResultsSchema = z
+  .object({ search_result_groups: searchResultGroupsSchema })
+  .transform(({ search_result_groups }) =>
+    search_result_groups
+      .flatMap(({ entries }) => entries)
+      .flatMap(({ url, title }) => (title === undefined ? [url] : [title, url]))
+      .join('\n'),
+  )
+
 /**
- * What the tool answered, from the results' texts, or null when none has
- * text. Images are left to the results themselves.
+ * What the tool answered, from the results' texts or the pages a web call
+ * found, or null when none has either. Images are left to the results
+ * themselves.
  */
 const toolOutput = (results: ChatGPTMessage[]) =>
   results
     .filter(({ metadata }) => !metadata.is_visually_hidden_from_conversation)
-    .map(({ content }) => toolTextSchema.safeParse(content).data)
+    .map(
+      ({ content, metadata }) =>
+        toolTextSchema.safeParse(content).data ||
+        webResultsSchema.safeParse(metadata).data,
+    )
     .filter(Boolean)
     .join('\n') || null
 
 const thoughtsSchema = z.object({
   thoughts: z.array(z.object({ summary: z.string(), content: z.string() })),
 })
-
-const sourceSchema = z.object({ url: z.string(), title: z.string().optional() })
 
 /**
  * The content references that cite the web, each as its marker in the reply
@@ -305,9 +325,7 @@ const referencesSchema = z.object({
         ),
     ),
   // Older replies cite without URLs, so their sources are what they searched.
-  search_result_groups: z
-    .array(z.object({ entries: z.array(sourceSchema) }))
-    .default([]),
+  search_result_groups: searchResultGroupsSchema,
 })
 
 /**
