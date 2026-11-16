@@ -131,7 +131,7 @@ const messageSchema = z.object({
     .loose(),
 })
 
-type Message = z.infer<typeof messageSchema>
+type ChatGPTMessage = z.infer<typeof messageSchema>
 
 const conversationSchema = z.object({
   create_time: epochSchema,
@@ -153,7 +153,7 @@ const visibleBranch = ({
   current_node,
   mapping,
 }: z.infer<typeof conversationSchema>) => {
-  const messages: Message[] = []
+  const messages: ChatGPTMessage[] = []
   const seen = new Set<string>()
   let id: string | null = current_node
   while (id !== null) {
@@ -214,7 +214,7 @@ const searchQueriesSchema = z.object({
 })
 
 /** What a tool call sent: its text, or the queries a web call ran. */
-const toolInput = (call: Message) =>
+const toolInput = (call: ChatGPTMessage) =>
   toolTextSchema.parse(call.content) ||
   (searchQueriesSchema.parse(call.metadata).search_queries ?? [])
     .map(({ q }) => q)
@@ -224,7 +224,7 @@ const toolInput = (call: Message) =>
  * What the tool answered, from the results' texts, or null when none has
  * text. Images are left to the results themselves.
  */
-const toolOutput = (results: Message[]) =>
+const toolOutput = (results: ChatGPTMessage[]) =>
   results
     .filter(({ metadata }) => !metadata.is_visually_hidden_from_conversation)
     .map(({ content }) => toolTextSchema.safeParse(content).data)
@@ -359,7 +359,10 @@ type ItemDraft = { type: string; payload: object }
  * conversation hides becomes none. A tool call takes its output from `results`,
  * the tool messages right after it.
  */
-const toItemDrafts = (message: Message, results: Message[]): ItemDraft[] => {
+const toItemDrafts = (
+  message: ChatGPTMessage,
+  results: ChatGPTMessage[],
+): ItemDraft[] => {
   if (message.metadata.is_visually_hidden_from_conversation) return []
   const { role } = message.author
   const { content_type } = message.content
@@ -374,7 +377,7 @@ const toItemDrafts = (message: Message, results: Message[]): ItemDraft[] => {
       message.metadata,
     )
     return [
-      // A turn that only called the web leaves an empty reply.
+      // A reply that only called the web is empty.
       ...(text === '' ? [] : [{ type: `${role}_message`, payload: { text } }]),
       ...(sources.length === 0
         ? []
@@ -431,7 +434,7 @@ const toItemDrafts = (message: Message, results: Message[]): ItemDraft[] => {
 }
 
 /** The tool messages right after a message on the branch: a call's results. */
-const resultsAfter = (branch: Message[], index: number) => {
+const resultsAfter = (branch: ChatGPTMessage[], index: number) => {
   const after = branch.slice(index + 1)
   const end = after.findIndex(({ author }) => author.role !== 'tool')
   return end === -1 ? after : after.slice(0, end)

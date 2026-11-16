@@ -767,7 +767,7 @@ describe('POST /sync with tool calls', () => {
   })
 })
 
-describe('POST /sync with a turn that has reasoning', () => {
+describe('POST /sync with a reply that has reasoning', () => {
   const sieveId = '673d0a1b-2c3d-8008-e394-0f1a2b3c4d5e'
 
   beforeEach(() => {
@@ -1070,7 +1070,7 @@ test('POST /sync archives the sources an older reply searched, as it cites none 
   })
 })
 
-const oneTurn = (id: string, prompt: string, at: string) => [
+const promptAndReply = (id: string, prompt: string, at: string) => [
   { id: `${id}-ask`, role: 'user' as const, text: prompt, at },
   { id: `${id}-reply`, role: 'assistant' as const, text: 'Sure.', at },
 ]
@@ -1081,7 +1081,7 @@ test('POST /sync archives archived and custom GPT chats too', async () => {
     title: 'Old trip',
     updatedAt: '2026-10-01T00:00:00.000000Z',
     archived: true,
-    nodes: oneTurn(
+    nodes: promptAndReply(
       'archived',
       'Plan a day in Nikko.',
       '2026-10-01T00:00:00.000Z',
@@ -1092,7 +1092,7 @@ test('POST /sync archives archived and custom GPT chats too', async () => {
     title: 'Recipe GPT',
     updatedAt: '2026-10-02T00:00:00.000000Z',
     gizmoId: 'g-fake0recipe',
-    nodes: oneTurn(
+    nodes: promptAndReply(
       'gizmo',
       'Scale this focaccia to two trays.',
       '2026-10-02T00:00:00.000Z',
@@ -1171,7 +1171,7 @@ describe('POST /sync again', () => {
       id: '673df605-6172-8008-e394-0f1a2b3c4d5e',
       title: 'Tokyo trip',
       updatedAt: '2026-11-03T00:00:00.000000Z',
-      nodes: oneTurn(
+      nodes: promptAndReply(
         'tokyo',
         'Best ramen near Shinjuku?',
         '2026-11-03T00:00:00.000Z',
@@ -1184,12 +1184,12 @@ describe('POST /sync again', () => {
       title: 'Tokyo trip',
       updatedAt: '2026-11-04T00:00:00.000000Z',
       nodes: [
-        ...oneTurn(
+        ...promptAndReply(
           'tokyo',
           'Best ramen near Shinjuku?',
           '2026-11-03T00:00:00.000Z',
         ),
-        ...oneTurn(
+        ...promptAndReply(
           'tokyo-2',
           'Is it open on Sundays?',
           '2026-11-04T00:00:00.000Z',
@@ -1233,7 +1233,7 @@ describe('POST /sync again', () => {
   })
 })
 
-/** Puts `count` one-turn chats, oldest first, and gives their IDs in that order. */
+/** Puts `count` chats of one prompt and reply, oldest first, and gives their IDs in that order. */
 const putChats = (count: number) =>
   Array.from({ length: count }, (_, index) => {
     const id = `chat-${String(index).padStart(3, '0')}`
@@ -1242,7 +1242,7 @@ const putChats = (count: number) =>
       id,
       title: `Chat ${index}`,
       updatedAt: at,
-      nodes: oneTurn(id, `Question ${index}`, at),
+      nodes: promptAndReply(id, `Question ${index}`, at),
     })
     return id
   })
@@ -1294,7 +1294,11 @@ describe('POST /sync with a backlog', () => {
       id: 'fresh',
       title: 'Fresh chat',
       updatedAt: '2026-11-10T00:00:00.000000Z',
-      nodes: oneTurn('fresh', 'Anything new?', '2026-11-10T00:00:00.000Z'),
+      nodes: promptAndReply(
+        'fresh',
+        'Anything new?',
+        '2026-11-10T00:00:00.000Z',
+      ),
     })
 
     await sync()
@@ -1505,7 +1509,11 @@ describe('POST /sync when reading a chat fails', () => {
       id: '673e0716-7283-8009-f4a5-1a2b3c4d5e6f',
       title: 'Newer',
       updatedAt: '2026-11-05T00:00:00.000000Z',
-      nodes: oneTurn('newer', 'A newer question', '2026-11-05T00:00:00.000Z'),
+      nodes: promptAndReply(
+        'newer',
+        'A newer question',
+        '2026-11-05T00:00:00.000Z',
+      ),
     })
     chatgpt.failRead('673e0716-7283-8009-f4a5-1a2b3c4d5e6f', 500)
 
