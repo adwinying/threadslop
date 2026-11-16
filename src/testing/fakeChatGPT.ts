@@ -144,8 +144,8 @@ export const createFakeChatGPT = () => {
   // The cookies chatgpt.com accepts: the latest it set for each name.
   const accepted = new Map([[sessionCookie, token]])
   const chats = new Map<string, ChatFixture>()
-  const listRequests: ListRequest[] = []
-  const reads: string[] = []
+  let listRequests: ListRequest[] = []
+  let reads: string[] = []
   const failedReads = new Map<string, number>()
   let unsent: [name: string, value: string][] = []
   let signedIn = true
@@ -259,10 +259,15 @@ export const createFakeChatGPT = () => {
 
   return {
     fetch,
-    /** Every conversations list request, in order. */
-    listRequests,
-    /** The ID of every chat read, in order. */
-    reads,
+    /** Every conversations list request since the last clear, in order. */
+    listRequests: () => [...listRequests],
+    /** The ID of every chat read since the last clear, in order. */
+    reads: () => [...reads],
+    /** Forgets the requests so far, so a test sees only the next Sync's. */
+    clearRequests: () => {
+      listRequests = []
+      reads = []
+    },
     /** Adds a chat, or replaces the one with the same ID. */
     putChat: (chat: ChatFixture) => {
       chats.set(chat.id, chat)

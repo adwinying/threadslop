@@ -137,7 +137,7 @@ describe('POST /sync with a ChatGPT session', () => {
         lastError: null,
       }),
     )
-    expect(chatgpt.listRequests).toEqual([
+    expect(chatgpt.listRequests()).toEqual([
       { offset: 0, limit: 100, order: 'updated', archived: false },
       { offset: 0, limit: 100, order: 'updated', archived: true },
     ])
@@ -166,7 +166,7 @@ describe('POST /sync with a ChatGPT session', () => {
 
     await sync()
 
-    expect(chatgpt.listRequests).toEqual([
+    expect(chatgpt.listRequests()).toEqual([
       { offset: 0, limit: 100, order: 'updated', archived: false },
       { offset: 100, limit: 100, order: 'updated', archived: false },
       { offset: 0, limit: 100, order: 'updated', archived: true },
@@ -1178,7 +1178,7 @@ describe('POST /sync again', () => {
       ),
     })
     await sync()
-    chatgpt.reads.length = 0
+    chatgpt.clearRequests()
     chatgpt.putChat({
       id: '673df605-6172-8008-e394-0f1a2b3c4d5e',
       title: 'Tokyo trip',
@@ -1199,7 +1199,7 @@ describe('POST /sync again', () => {
 
     await sync()
 
-    expect(chatgpt.reads).toEqual(['673df605-6172-8008-e394-0f1a2b3c4d5e'])
+    expect(chatgpt.reads()).toEqual(['673df605-6172-8008-e394-0f1a2b3c4d5e'])
     expect(await getJson('/search?q=sundays')).toEqual({
       hits: [
         expect.objectContaining({
@@ -1224,12 +1224,12 @@ describe('POST /sync again', () => {
     await sync()
     chatgpt.removeChat(sourdough.id)
     await sync()
-    chatgpt.reads.length = 0
+    chatgpt.clearRequests()
     chatgpt.putChat({ ...sourdough, archived: true })
 
     await sync()
 
-    expect(chatgpt.reads).toEqual([])
+    expect(chatgpt.reads()).toEqual([])
   })
 })
 
@@ -1254,14 +1254,14 @@ describe('POST /sync with a backlog', () => {
 
     await sync()
 
-    expect(chatgpt.reads).toEqual(ids.slice(0, 30))
+    expect(chatgpt.reads()).toEqual(ids.slice(0, 30))
 
     // 250 chats at 30 per Sync take 9 Syncs.
     for (let syncs = 1; syncs < 9; syncs++) await sync()
-    chatgpt.reads.length = 0
+    chatgpt.clearRequests()
     await sync()
 
-    expect(chatgpt.reads).toEqual([])
+    expect(chatgpt.reads()).toEqual([])
     for (const id of [ids[0], ids[249]]) {
       expect(await testApp.handle(`/threads/chatgpt/${id}`)).toHaveProperty(
         'status',
@@ -1274,12 +1274,12 @@ describe('POST /sync with a backlog', () => {
     chatgpt.removeChat(sourdough.id)
     putChats(150)
     for (let syncs = 0; syncs < 5; syncs++) await sync()
-    chatgpt.listRequests.length = 0
+    chatgpt.clearRequests()
 
     await sync()
 
     expect(
-      chatgpt.listRequests.map(({ offset, archived }) => ({
+      chatgpt.listRequests().map(({ offset, archived }) => ({
         offset,
         archived,
       })),
@@ -1288,8 +1288,7 @@ describe('POST /sync with a backlog', () => {
       { offset: 0, archived: true },
     ])
 
-    chatgpt.listRequests.length = 0
-    chatgpt.reads.length = 0
+    chatgpt.clearRequests()
     chatgpt.putChat({
       id: 'fresh',
       title: 'Fresh chat',
@@ -1304,7 +1303,7 @@ describe('POST /sync with a backlog', () => {
     await sync()
 
     expect(
-      chatgpt.listRequests.map(({ offset, archived }) => ({
+      chatgpt.listRequests().map(({ offset, archived }) => ({
         offset,
         archived,
       })),
@@ -1313,7 +1312,7 @@ describe('POST /sync with a backlog', () => {
       { offset: 100, archived: false },
       { offset: 0, archived: true },
     ])
-    expect(chatgpt.reads).toEqual(['fresh'])
+    expect(chatgpt.reads()).toEqual(['fresh'])
   })
 })
 
@@ -1375,7 +1374,7 @@ describe('POST /sync and the ChatGPT session', () => {
     await sync()
     await sync()
 
-    expect(chatgpt.listRequests).toHaveLength(4)
+    expect(chatgpt.listRequests()).toHaveLength(4)
     expect(await chatgptRow()).toEqual(
       expect.objectContaining({ lastError: null }),
     )
@@ -1525,15 +1524,15 @@ describe('POST /sync when reading a chat fails', () => {
           'ChatGPT answered /backend-api/conversation/673e0716-7283-8009-f4a5-1a2b3c4d5e6f with HTTP 500',
       }),
     )
-    expect(chatgpt.reads).toEqual([
+    expect(chatgpt.reads()).toEqual([
       sourdough.id,
       '673e0716-7283-8009-f4a5-1a2b3c4d5e6f',
     ])
 
-    chatgpt.reads.length = 0
+    chatgpt.clearRequests()
     await sync()
 
-    expect(chatgpt.reads).toEqual(['673e0716-7283-8009-f4a5-1a2b3c4d5e6f'])
+    expect(chatgpt.reads()).toEqual(['673e0716-7283-8009-f4a5-1a2b3c4d5e6f'])
     expect(await chatgptRow()).toEqual(
       expect.objectContaining({ lastError: null }),
     )
