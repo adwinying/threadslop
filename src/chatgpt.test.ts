@@ -470,6 +470,274 @@ describe('POST /sync with images', () => {
   })
 })
 
+const search = async (q: string, items?: 'all') => {
+  const params = new URLSearchParams({
+    q,
+    host: 'chatgpt',
+    ...(items && { items }),
+  })
+  return z
+    .object({ hits: z.array(z.object({ itemType: z.string() }).loose()) })
+    .parse(await getJson(`/search?${params}`))
+    .hits.map(({ itemType }) => itemType)
+}
+
+describe('POST /sync with tool calls', () => {
+  const threadId = '673fa1b2-7283-8009-f4a5-1a2b3c4d5e6f'
+
+  const threadItems = async () =>
+    z
+      .object({
+        items: z.array(
+          z.object({ type: z.string(), payload: z.string() }).loose(),
+        ),
+      })
+      .parse(await getJson(`/threads/chatgpt/${threadId}?items=all`))
+      .items.map(({ type, payload }) => ({
+        type,
+        payload: JSON.parse(payload),
+      }))
+
+  test('archives a code interpreter run as a command execution', async () => {
+    chatgpt.putChat({
+      id: threadId,
+      title: 'Loaf costs',
+      updatedAt: '2026-11-05T10:00:00.000000Z',
+      nodes: [
+        {
+          id: 'n-ask',
+          role: 'user',
+          text: 'What does one loaf cost?',
+          at: '2026-11-05T09:00:00.000Z',
+        },
+        {
+          id: 'n-code',
+          role: 'assistant',
+          recipient: 'python',
+          content: {
+            content_type: 'code',
+            language: 'unknown',
+            response_format_name: null,
+            text: 'flour_yen = 500 * 0.4\nflour_yen + 35',
+          },
+          at: '2026-11-05T09:00:02.000Z',
+        },
+        {
+          id: 'n-output',
+          role: 'tool',
+          name: 'python',
+          content: { content_type: 'execution_output', text: '235.0' },
+          metadata: { aggregate_result: { status: 'success' } },
+          at: '2026-11-05T09:00:03.000Z',
+        },
+        {
+          id: 'n-reply',
+          role: 'assistant',
+          text: 'About 235 yen.',
+          at: '2026-11-05T09:00:04.000Z',
+        },
+      ],
+    })
+
+    await sync()
+
+    expect(await threadItems()).toEqual([
+      { type: 'user_message', payload: { text: 'What does one loaf cost?' } },
+      {
+        type: 'command_execution',
+        payload: {
+          input: 'flour_yen = 500 * 0.4\nflour_yen + 35',
+          output: '235.0',
+        },
+      },
+      { type: 'assistant_message', payload: { text: 'About 235 yen.' } },
+    ])
+    expect(await search('flour_yen')).toEqual([])
+    expect(await search('flour_yen', 'all')).toEqual(['command_execution'])
+    expect(await search('235.0', 'all')).toEqual(['command_execution'])
+  })
+
+  test('archives browsing, image generation and other tool calls as dynamic tools', async () => {
+    chatgpt.putChat({
+      id: threadId,
+      title: 'Bakery logo',
+      updatedAt: '2026-11-05T10:00:00.000000Z',
+      nodes: [
+        {
+          id: 'n-ask',
+          role: 'user',
+          text: 'Find a bakery font and draw a logo.',
+          at: '2026-11-05T09:00:00.000Z',
+        },
+        // Browsing: a web call that leaves its text empty, then the search.
+        {
+          id: 'n-web',
+          role: 'assistant',
+          recipient: 'web',
+          at: '2026-11-05T09:00:01.000Z',
+        },
+        {
+          id: 'n-web-run',
+          role: 'assistant',
+          recipient: 'web.run',
+          metadata: {
+            search_queries: [
+              { type: 'search', q: 'rounded serif bakery font' },
+              { type: 'search', q: 'free bakery logo fonts' },
+            ],
+          },
+          at: '2026-11-05T09:00:02.000Z',
+        },
+        {
+          id: 'n-web-result',
+          role: 'tool',
+          name: 'web.run',
+          metadata: {
+            search_result_groups: [
+              {
+                type: 'search_result_group',
+                domain: 'example.com',
+                entries: [
+                  {
+                    type: 'search_result',
+                    url: 'https://example.com/fonts',
+                    title: 'Bakery fonts',
+                    snippet: 'Rounded serifs for bakeries.',
+                  },
+                ],
+              },
+            ],
+          },
+          at: '2026-11-05T09:00:03.000Z',
+        },
+        {
+          id: 'n-image-call',
+          role: 'assistant',
+          recipient: 't2uay3k.sj1i4kz',
+          content: {
+            content_type: 'code',
+            language: 'unknown',
+            response_format_name: null,
+            text: '{"prompt":"A rye loaf logo in a rounded serif"}',
+          },
+          at: '2026-11-05T09:00:04.000Z',
+        },
+        {
+          id: 'n-image-progress',
+          role: 'tool',
+          name: 't2uay3k.sj1i4kz',
+          text: 'Processing image',
+          metadata: { is_visually_hidden_from_conversation: true },
+          at: '2026-11-05T09:00:05.000Z',
+        },
+        {
+          id: 'n-image',
+          role: 'tool',
+          name: 't2uay3k.sj1i4kz',
+          content: {
+            content_type: 'multimodal_text',
+            parts: [
+              {
+                content_type: 'image_asset_pointer',
+                asset_pointer: 'sediment://file_00000000fake0logo',
+                width: 1024,
+                height: 1024,
+              },
+            ],
+          },
+          at: '2026-11-05T09:00:20.000Z',
+        },
+        {
+          id: 'n-image-done',
+          role: 'tool',
+          name: 't2uay3k.sj1i4kz',
+          recipient: 'assistant',
+          text: 'GPT-4o returned 1 images.',
+          at: '2026-11-05T09:00:21.000Z',
+        },
+        {
+          id: 'n-connector-call',
+          role: 'assistant',
+          recipient: 'api_tool.call_tool',
+          text: '{"path":"/Shopping research/start","args":"{\\"query\\":\\"bread lame\\"}"}',
+          at: '2026-11-05T09:00:22.000Z',
+        },
+        {
+          id: 'n-connector-ack',
+          role: 'tool',
+          name: 'api_tool.call_tool',
+          content: {
+            content_type: 'code',
+            language: 'unknown',
+            response_format_name: null,
+            text: '{}',
+          },
+          at: '2026-11-05T09:00:23.000Z',
+        },
+        {
+          id: 'n-connector-result',
+          role: 'tool',
+          name: 'api_tool',
+          text: '{"products":["Walnut bread lame"]}',
+          at: '2026-11-05T09:00:24.000Z',
+        },
+        {
+          id: 'n-reply',
+          role: 'assistant',
+          text: 'Here is your logo.',
+          at: '2026-11-05T09:00:25.000Z',
+        },
+      ],
+    })
+
+    await sync()
+
+    expect(await threadItems()).toEqual([
+      expect.objectContaining({ type: 'user_message' }),
+      {
+        type: 'dynamic_tool',
+        payload: { toolName: 'web', input: '', output: null },
+      },
+      {
+        type: 'dynamic_tool',
+        payload: {
+          toolName: 'web.run',
+          input: 'rounded serif bakery font\nfree bakery logo fonts',
+          output: null,
+        },
+      },
+      {
+        type: 'dynamic_tool',
+        payload: {
+          toolName: 't2uay3k.sj1i4kz',
+          input: '{"prompt":"A rye loaf logo in a rounded serif"}',
+          output: 'GPT-4o returned 1 images.',
+        },
+      },
+      {
+        type: 'assistant_message',
+        payload: { text: '![image](chatgpt-file:file_00000000fake0logo)' },
+      },
+      {
+        type: 'dynamic_tool',
+        payload: {
+          toolName: 'api_tool.call_tool',
+          input:
+            '{"path":"/Shopping research/start","args":"{\\"query\\":\\"bread lame\\"}"}',
+          output: '{}\n{"products":["Walnut bread lame"]}',
+        },
+      },
+      expect.objectContaining({ type: 'assistant_message' }),
+    ])
+    expect(await search('rounded serif')).toEqual([])
+    expect(await search('rounded serif bakery', 'all')).toEqual([
+      'dynamic_tool',
+    ])
+    expect(await search('rye loaf logo', 'all')).toEqual(['dynamic_tool'])
+    expect(await search('Walnut', 'all')).toEqual(['dynamic_tool'])
+  })
+})
+
 const oneTurn = (id: string, prompt: string, at: string) => [
   { id: `${id}-ask`, role: 'user' as const, text: prompt, at },
   { id: `${id}-reply`, role: 'assistant' as const, text: 'Sure.', at },

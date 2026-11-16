@@ -191,14 +191,44 @@ const multimodalSchema = z.object({
   parts: z.array(z.union([z.string(), imageSchema])),
 })
 
+/** A tool call or result's text: text parts, or code and its output. */
+const toolTextSchema = z.union([
+  textSchema.transform(({ parts }) => parts.join('\n')),
+  z.object({ text: z.string() }).transform(({ text }) => text),
+])
+
+// A web call leaves its text empty and names its queries here.
+const searchQueriesSchema = z.object({
+  search_queries: z.array(z.object({ q: z.string() })).optional(),
+})
+
+/** What a tool call sent: its text, or the queries a web call ran. */
+const toolInput = (call: Message) =>
+  toolTextSchema.parse(call.content) ||
+  (searchQueriesSchema.parse(call.metadata).search_queries ?? [])
+    .map(({ q }) => q)
+    .join('\n')
+
+/**
+ * What the tool answered, from the results' texts, or null when none has
+ * text. Images are left to the results themselves.
+ */
+const toolOutput = (results: Message[]) =>
+  results
+    .filter(({ metadata }) => !metadata.is_visually_hidden_from_conversation)
+    .map(({ content }) => toolTextSchema.safeParse(content).data)
+    .filter(Boolean)
+    .join('\n') || null
+
 /** An Item a message becomes, before its Thread numbers it. */
 type ItemDraft = { type: string; payload: object }
 
 /**
  * The Items a message on the visible branch becomes, by what it holds. One the
- * conversation hides becomes none.
+ * conversation hides becomes none. A tool call takes its output from `results`,
+ * the tool messages right after it.
  */
-const toItemDrafts = (message: Message): ItemDraft[] => {
+const toItemDrafts = (message: Message, results: Message[]): ItemDraft[] => {
   if (message.metadata.is_visually_hidden_from_conversation) return []
   const { role } = message.author
   const { content_type } = message.content
@@ -225,18 +255,49 @@ const toItemDrafts = (message: Message): ItemDraft[] => {
     return text === '' ? [] : [{ type, payload: { text } }]
   }
 
+  if (role === 'assistant' && message.recipient === 'python') {
+    return [
+      {
+        type: 'command_execution',
+        payload: { input: toolInput(message), output: toolOutput(results) },
+      },
+    ]
+  }
+
+  // Memory writes (`bio`) stay out, like the memory context they update.
+  if (role === 'assistant' && !['all', 'bio'].includes(message.recipient)) {
+    return [
+      {
+        type: 'dynamic_tool',
+        payload: {
+          toolName: message.recipient,
+          input: toolInput(message),
+          output: toolOutput(results),
+        },
+      },
+    ]
+  }
+
   // Not shown as a Message: system, memory and context messages, and tool
-  // calls with their results.
+  // results, which their calls hold.
   return []
+}
+
+/** The tool messages right after a message on the branch: a call's results. */
+const resultsAfter = (branch: Message[], index: number) => {
+  const after = branch.slice(index + 1)
+  const end = after.findIndex(({ author }) => author.role !== 'tool')
+  return end === -1 ? after : after.slice(0, end)
 }
 
 /** A conversation's start, and the Item drafts of its visible branch in order. */
 const parseChat = (body: unknown) => {
   const conversation = conversationSchema.parse(body)
+  const branch = visibleBranch(conversation)
   return {
     createdAt: conversation.create_time,
-    drafts: visibleBranch(conversation).flatMap((message) =>
-      toItemDrafts(message).map((draft) => ({
+    drafts: branch.flatMap((message, index) =>
+      toItemDrafts(message, resultsAfter(branch, index)).map((draft) => ({
         ...draft,
         messageId: message.id,
         at: message.create_time,
