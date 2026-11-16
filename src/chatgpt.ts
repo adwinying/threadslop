@@ -5,10 +5,16 @@ import { z } from 'zod'
 import { createRequest, saveSessionStore } from '~/web'
 
 // Everything about chatgpt.com's undocumented backend API lives in this
-// module. Its shapes come from maintained exporters' source, not OpenAI.
+// module. Its shapes were checked against real responses in the spike (#36),
+// not documented, so a shape that doesn't match fails the read instead of
+// saving half a chat.
 
 /** The Source label ChatGPT Threads are archived under. */
 export const chatgptLabel = 'chatgpt'
+
+/** The web URL of a ChatGPT chat, by Thread ID. */
+export const chatgptChatUrl = (threadId: string) =>
+  `https://chatgpt.com/c/${threadId}`
 
 /**
  * The next-auth cookie holding the session. A browser may hold it split into
@@ -90,11 +96,137 @@ export const checkChatGPTSignIn = async ({
 
 const chatsPerPage = 100
 
-// Only the ID: the spike checks the list arrives, and what each chat holds is
-// verified against real responses before the full slice parses it.
 const listPageSchema = z.object({
-  items: z.array(z.object({ id: z.string() })),
+  items: z.array(
+    z
+      .object({
+        id: z.string(),
+        title: z.string(),
+        // The list gives ISO times; a conversation gives epoch seconds.
+        update_time: z.iso.datetime(),
+      })
+      .transform(({ id, title, update_time }) => ({
+        threadId: id,
+        title,
+        updatedAt: new Date(update_time),
+      })),
+  ),
 })
+
+/** A chat as the list reports it. */
+export type ListedChat = z.infer<typeof listPageSchema>['items'][number]
+
+/** Epoch seconds, as a conversation gives its times. */
+const epochSchema = z.number().transform((seconds) => new Date(seconds * 1000))
+
+const messageSchema = z.object({
+  id: z.string(),
+  author: z.object({ role: z.string() }),
+  create_time: epochSchema.nullable(),
+  content: z.object({ content_type: z.string() }).loose(),
+  /** `all`, or the tool an assistant message calls. */
+  recipient: z.string(),
+  metadata: z
+    .object({ is_visually_hidden_from_conversation: z.boolean().optional() })
+    .loose(),
+})
+
+type Message = z.infer<typeof messageSchema>
+
+const conversationSchema = z.object({
+  create_time: epochSchema,
+  current_node: z.string(),
+  mapping: z.record(
+    z.string(),
+    z.object({
+      message: messageSchema.nullable(),
+      parent: z.string().nullable(),
+    }),
+  ),
+})
+
+/**
+ * The messages the ChatGPT UI shows, oldest first: the current node up through
+ * its parents. Regenerations off that branch are left out.
+ */
+const visibleBranch = ({
+  current_node,
+  mapping,
+}: z.infer<typeof conversationSchema>) => {
+  const messages: Message[] = []
+  const seen = new Set<string>()
+  let id: string | null = current_node
+  while (id !== null) {
+    const node: (typeof mapping)[string] | undefined = mapping[id]
+    // Guards against walking forever: Syncs never overlap, so one stuck read
+    // would stall every Source.
+    if (node === undefined || seen.has(id)) {
+      throw new Error(`its branch breaks at node ${id}`)
+    }
+    seen.add(id)
+    if (node.message !== null) messages.push(node.message)
+    id = node.parent
+  }
+  return messages.toReversed()
+}
+
+const textSchema = z.object({ parts: z.array(z.string()) })
+
+/** An Item a message becomes, before its Thread numbers it. */
+type ItemDraft = { type: string; payload: object }
+
+/**
+ * The Items a message on the visible branch becomes, by what it holds. One the
+ * conversation hides becomes none.
+ */
+const toItemDrafts = (message: Message): ItemDraft[] => {
+  if (message.metadata.is_visually_hidden_from_conversation) return []
+  const { role } = message.author
+  const { content_type } = message.content
+
+  if (
+    content_type === 'text' &&
+    message.recipient === 'all' &&
+    (role === 'user' || role === 'assistant')
+  ) {
+    const text = textSchema.parse(message.content).parts.join('\n')
+    // A turn that only called the web leaves an empty reply.
+    return text === '' ? [] : [{ type: `${role}_message`, payload: { text } }]
+  }
+
+  // Not shown as a Message: system, memory and context messages, and tool
+  // calls with their results.
+  return []
+}
+
+/** A conversation's start, and the Item drafts of its visible branch in order. */
+const parseChat = (body: unknown) => {
+  const conversation = conversationSchema.parse(body)
+  return {
+    createdAt: conversation.create_time,
+    drafts: visibleBranch(conversation).flatMap((message) =>
+      toItemDrafts(message).map((draft) => ({
+        ...draft,
+        messageId: message.id,
+        at: message.create_time,
+      })),
+    ),
+  }
+}
+
+export type Chat = ReturnType<typeof parseChat>
+
+/** Runs a parser, naming what didn't parse when ChatGPT's format changed. */
+const parseOrThrow = <T>(what: string, parse: () => T) => {
+  try {
+    return parse()
+  } catch (cause) {
+    if (!(cause instanceof Error)) throw cause
+    const detail =
+      cause instanceof z.ZodError ? z.prettifyError(cause) : cause.message
+    throw new Error(`${what} didn't parse: ${detail}`, { cause })
+  }
+}
 
 /** What reaching ChatGPT with the stored session takes. */
 export type ChatGPTCollaborators = {
@@ -129,6 +261,14 @@ export const connectChatGPT = async ({
     throw new Error('signed out; run install-chatgpt')
   }
 
+  const getJson = async (path: string, query = '') => {
+    const response = await request(`${origin}${path}${query}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    await ensureOk(response, path)
+    return response.json()
+  }
+
   return {
     /** One page of chats, most recently updated first. */
     listChats: async ({
@@ -138,30 +278,28 @@ export const connectChatGPT = async ({
       offset: number
       archived: boolean
     }) => {
-      const path = '/backend-api/conversations'
       const query = new URLSearchParams({
         offset: String(offset),
         limit: String(chatsPerPage),
         order: 'updated',
         is_archived: String(archived),
       })
-      const response = await request(`${origin}${path}?${query}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      })
-      await ensureOk(response, path)
-      const page = listPageSchema.safeParse(await response.json())
-      if (!page.success) {
-        throw new Error(
-          `ChatGPT's chat list didn't parse: ${z.prettifyError(page.error)}`,
-        )
-      }
-      const { items } = page.data
+      const body = await getJson('/backend-api/conversations', `?${query}`)
+      const { items } = parseOrThrow("ChatGPT's chat list", () =>
+        listPageSchema.parse(body),
+      )
       return {
         chats: items,
         // A short page is the last.
         nextOffset:
           items.length < chatsPerPage ? undefined : offset + items.length,
       }
+    },
+
+    /** A chat's start, and the Item drafts of its visible branch in order. */
+    readChat: async (threadId: string) => {
+      const body = await getJson(`/backend-api/conversation/${threadId}`)
+      return parseOrThrow(`ChatGPT chat ${threadId}`, () => parseChat(body))
     },
   }
 }
