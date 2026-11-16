@@ -220,6 +220,95 @@ const toolOutput = (results: Message[]) =>
     .filter(Boolean)
     .join('\n') || null
 
+const thoughtsSchema = z.object({
+  thoughts: z.array(z.object({ summary: z.string(), content: z.string() })),
+})
+
+const sourceSchema = z.object({ url: z.string(), title: z.string().optional() })
+
+/**
+ * The content references that cite the web, each as its marker in the reply
+ * and the sources it cites. Markers are private-use characters, never `【…】`,
+ * which is real text.
+ */
+const citationSchema = z.discriminatedUnion('type', [
+  z
+    .object({ type: z.literal('hidden'), matched_text: z.string() })
+    .transform(({ matched_text }) => ({ marker: matched_text, sources: [] })),
+  z
+    .object({
+      type: z.literal('grouped_webpages'),
+      matched_text: z.string(),
+      items: z.array(sourceSchema),
+    })
+    .transform(({ matched_text, items }) => ({
+      marker: matched_text,
+      sources: items,
+    })),
+  z
+    .object({
+      type: z.literal('webpage'),
+      matched_text: z.string(),
+      ...sourceSchema.shape,
+    })
+    .transform(({ matched_text, url, title }) => ({
+      marker: matched_text,
+      sources: [{ url, title }],
+    })),
+  // Its marker is a space ending the reply, not a citation, so it strips
+  // nothing.
+  z
+    .object({
+      type: z.literal('sources_footnote'),
+      sources: z.array(sourceSchema),
+    })
+    .transform(({ sources }) => ({ marker: '', sources })),
+])
+
+/** The other references name what the reply shows, so their text stays. */
+const citationTypes = new Set([
+  'hidden',
+  'grouped_webpages',
+  'webpage',
+  'sources_footnote',
+])
+
+const citationsSchema = z.object({
+  content_references: z
+    .array(z.looseObject({ type: z.string() }))
+    .default([])
+    .transform((references) =>
+      references
+        .filter(({ type }) => citationTypes.has(type))
+        .map((reference) => citationSchema.parse(reference)),
+    ),
+  // Older replies cite without URLs, so their sources are what they searched.
+  search_result_groups: z
+    .array(z.object({ entries: z.array(sourceSchema) }))
+    .default([]),
+})
+
+/** A reply's text without its citation markers, and the web sources it cites. */
+const citedReply = (text: string, metadata: unknown) => {
+  const { content_references, search_result_groups } =
+    citationsSchema.parse(metadata)
+  const cited = [
+    ...content_references.flatMap(({ sources }) => sources),
+    ...search_result_groups.flatMap(({ entries }) => entries),
+  ]
+  return {
+    text: content_references.reduce(
+      (stripped, { marker }) => stripped.replaceAll(marker, ''),
+      text,
+    ),
+    // Each source once, where it's first cited.
+    sources: cited.filter(
+      ({ url }, index) =>
+        cited.findIndex((source) => source.url === url) === index,
+    ),
+  }
+}
+
 /** An Item a message becomes, before its Thread numbers it. */
 type ItemDraft = { type: string; payload: object }
 
@@ -238,9 +327,25 @@ const toItemDrafts = (message: Message, results: Message[]): ItemDraft[] => {
     message.recipient === 'all' &&
     (role === 'user' || role === 'assistant')
   ) {
-    const text = textSchema.parse(message.content).parts.join('\n')
-    // A turn that only called the web leaves an empty reply.
-    return text === '' ? [] : [{ type: `${role}_message`, payload: { text } }]
+    const { text, sources } = citedReply(
+      textSchema.parse(message.content).parts.join('\n'),
+      message.metadata,
+    )
+    return [
+      // A turn that only called the web leaves an empty reply.
+      ...(text === '' ? [] : [{ type: `${role}_message`, payload: { text } }]),
+      ...(sources.length === 0
+        ? []
+        : [{ type: 'web_sources', payload: { sources } }]),
+    ]
+  }
+
+  if (content_type === 'thoughts') {
+    const text = thoughtsSchema
+      .parse(message.content)
+      .thoughts.flatMap(({ summary, content }) => [`**${summary}**`, content])
+      .join('\n\n')
+    return [{ type: 'reasoning', payload: { text } }]
   }
 
   // Images come in a user message, or for a generated image in the image

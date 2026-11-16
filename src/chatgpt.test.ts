@@ -738,6 +738,293 @@ describe('POST /sync with tool calls', () => {
   })
 })
 
+describe('POST /sync with a turn that has reasoning', () => {
+  const sieveId = '673d0a1b-2c3d-8008-e394-0f1a2b3c4d5e'
+
+  beforeEach(() => {
+    chatgpt.putChat({
+      id: sieveId,
+      title: 'Prime sieve',
+      updatedAt: '2026-11-03T10:00:00.000000Z',
+      nodes: [
+        {
+          id: 'n-ask',
+          role: 'user',
+          text: 'Fastest way to list primes below a million?',
+          at: '2026-11-03T10:00:00.000Z',
+        },
+        {
+          id: 'n-thoughts',
+          role: 'assistant',
+          content: {
+            content_type: 'thoughts',
+            thoughts: [
+              {
+                summary: 'Weighing approaches',
+                content: 'Trial division is too slow.',
+                chunks: [],
+                finished: true,
+              },
+              {
+                summary: 'Picking a sieve',
+                content: 'Eratosthenes fits a million.',
+                chunks: [],
+                finished: true,
+              },
+            ],
+          },
+          at: '2026-11-03T10:00:01.000Z',
+        },
+        {
+          id: 'n-recap',
+          role: 'assistant',
+          content: {
+            content_type: 'reasoning_recap',
+            content: 'Thought for a few seconds',
+          },
+          at: '2026-11-03T10:00:02.000Z',
+        },
+        {
+          id: 'n-reply',
+          role: 'assistant',
+          text: 'Use the sieve of Eratosthenes.',
+          at: '2026-11-03T10:00:03.000Z',
+        },
+      ],
+    })
+  })
+
+  test('archives the thoughts as reasoning between the prompt and the reply', async () => {
+    await sync()
+
+    expect(await getJson(`/threads/chatgpt/${sieveId}?items=all`)).toEqual({
+      thread: expect.anything(),
+      items: [
+        expect.objectContaining({ id: `${sieveId}:n-ask:user_message` }),
+        expect.objectContaining({
+          id: `${sieveId}:n-thoughts:reasoning`,
+          type: 'reasoning',
+          role: null,
+          text: [
+            '**Weighing approaches**',
+            'Trial division is too slow.',
+            '**Picking a sieve**',
+            'Eratosthenes fits a million.',
+          ].join('\n\n'),
+        }),
+        expect.objectContaining({ id: `${sieveId}:n-reply:assistant_message` }),
+      ],
+    })
+  })
+
+  test('search finds the reasoning only with items=all', async () => {
+    await sync()
+
+    expect(await getJson('/search?q=trial division')).toEqual({ hits: [] })
+    expect(await getJson('/search?q=trial division&items=all')).toEqual({
+      hits: [expect.objectContaining({ itemType: 'reasoning' })],
+    })
+  })
+})
+
+/** A citation marker as ChatGPT writes it, in private-use characters. */
+const cite = (...refs: string[]) =>
+  `\uE200cite\uE202${refs.join('\uE202')}\uE201`
+
+describe('POST /sync with a reply that cites sources', () => {
+  const hydrationId = '673e1b2c-3d4e-8009-f4a5-1a2b3c4d5e6f'
+  const entity = '\uE200entity\uE202["bakery","Tartine"]\uE201'
+  const [first, second] = [cite('turn0search0'), cite('turn0search1')]
+  const reply = `【重要】Start around 70%\uE203.${first} ${entity} uses 75%.${second}`
+
+  beforeEach(() => {
+    chatgpt.putChat({
+      id: hydrationId,
+      title: 'Bread hydration',
+      updatedAt: '2026-11-04T10:00:00.000000Z',
+      nodes: [
+        {
+          id: 'n-ask',
+          role: 'user',
+          text: '【質問】What hydration suits a beginner loaf?',
+          at: '2026-11-04T10:00:00.000Z',
+        },
+        {
+          id: 'n-reply',
+          role: 'assistant',
+          text: reply,
+          metadata: {
+            content_references: [
+              { type: 'hidden', matched_text: '\uE203', alt: null },
+              {
+                type: 'grouped_webpages',
+                matched_text: first,
+                items: [
+                  {
+                    title: 'Baker’s percentages explained',
+                    url: 'https://www.kingarthurbaking.com/blog/hydration?utm_source=chatgpt.com',
+                    snippet: 'Hydration is water over flour.',
+                    attribution: 'King Arthur Baking',
+                  },
+                ],
+              },
+              {
+                type: 'entity',
+                matched_text: entity,
+                alt: 'Tartine',
+              },
+              {
+                type: 'grouped_webpages',
+                matched_text: second,
+                items: [
+                  {
+                    title: 'Untitled crumb guide',
+                    url: 'https://example.org/crumb-guide',
+                    snippet: '',
+                    attribution: 'example.org',
+                  },
+                ],
+              },
+              {
+                type: 'sources_footnote',
+                matched_text: ' ',
+                sources: [
+                  {
+                    title: 'Baker’s percentages explained',
+                    url: 'https://www.kingarthurbaking.com/blog/hydration?utm_source=chatgpt.com',
+                    attribution: 'King Arthur Baking',
+                  },
+                  {
+                    title: 'Tartine country loaf',
+                    url: 'https://example.com/tartine',
+                    attribution: 'example.com',
+                  },
+                ],
+              },
+            ],
+          },
+          at: '2026-11-04T10:00:05.000Z',
+        },
+      ],
+    })
+  })
+
+  test('archives the sources after the reply, without its citation markers', async () => {
+    await sync()
+
+    expect(await getJson(`/threads/chatgpt/${hydrationId}?items=all`)).toEqual({
+      thread: expect.anything(),
+      items: [
+        expect.objectContaining({
+          text: '【質問】What hydration suits a beginner loaf?',
+        }),
+        expect.objectContaining({
+          id: `${hydrationId}:n-reply:assistant_message`,
+          // 【…】 is real text, and an entity names something the reply shows.
+          text: `【重要】Start around 70%. ${entity} uses 75%.`,
+        }),
+        expect.objectContaining({
+          id: `${hydrationId}:n-reply:web_sources`,
+          type: 'web_sources',
+          role: null,
+          payload: JSON.stringify({
+            sources: [
+              {
+                url: 'https://www.kingarthurbaking.com/blog/hydration?utm_source=chatgpt.com',
+                title: 'Baker’s percentages explained',
+              },
+              {
+                url: 'https://example.org/crumb-guide',
+                title: 'Untitled crumb guide',
+              },
+              {
+                url: 'https://example.com/tartine',
+                title: 'Tartine country loaf',
+              },
+            ],
+          }),
+        }),
+      ],
+    })
+  })
+
+  test('search finds sources by title and URL only with items=all', async () => {
+    await sync()
+
+    expect(await getJson('/search?q=percentages')).toEqual({ hits: [] })
+    expect(await getJson('/search?q=percentages&items=all')).toEqual({
+      hits: [expect.objectContaining({ itemType: 'web_sources' })],
+    })
+    expect(await getJson('/search?q=crumb-guide&items=all')).toEqual({
+      hits: [expect.objectContaining({ itemType: 'web_sources' })],
+    })
+  })
+})
+
+test('POST /sync archives the sources an older reply searched, as it cites none by URL', async () => {
+  const baseId = '672f2c3d-4e5f-800a-a5b6-2b3c4d5e6f70'
+  chatgpt.putChat({
+    id: baseId,
+    title: 'Base64 images',
+    updatedAt: '2024-11-05T10:00:00.000000Z',
+    nodes: [
+      {
+        id: 'n-ask',
+        role: 'user',
+        text: 'Convert a PNG to base64 in JavaScript?',
+        at: '2024-11-05T10:00:00.000Z',
+      },
+      {
+        id: 'n-reply',
+        role: 'assistant',
+        text: 'Use the FileReader API.',
+        metadata: {
+          citations: [
+            { start_ix: 23, end_ix: 24, invalid_reason: 'Unsupported' },
+          ],
+          content_references: [{ type: 'hidden', matched_text: '' }],
+          search_result_groups: [
+            {
+              type: 'search_result_group',
+              domain: 'developer.mozilla.org',
+              entries: [
+                {
+                  type: 'search_result',
+                  url: 'https://developer.mozilla.org/docs/Web/API/FileReader',
+                  title: 'FileReader - Web APIs',
+                  snippet: 'Reads the contents of files.',
+                },
+              ],
+            },
+          ],
+        },
+        at: '2024-11-05T10:00:05.000Z',
+      },
+    ],
+  })
+
+  await sync()
+
+  expect(await getJson(`/threads/chatgpt/${baseId}?items=all`)).toEqual({
+    thread: expect.anything(),
+    items: [
+      expect.objectContaining({ type: 'user_message' }),
+      expect.objectContaining({ text: 'Use the FileReader API.' }),
+      expect.objectContaining({
+        type: 'web_sources',
+        payload: JSON.stringify({
+          sources: [
+            {
+              url: 'https://developer.mozilla.org/docs/Web/API/FileReader',
+              title: 'FileReader - Web APIs',
+            },
+          ],
+        }),
+      }),
+    ],
+  })
+})
+
 const oneTurn = (id: string, prompt: string, at: string) => [
   { id: `${id}-ask`, role: 'user' as const, text: prompt, at },
   { id: `${id}-reply`, role: 'assistant' as const, text: 'Sure.', at },
