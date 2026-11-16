@@ -863,8 +863,11 @@ const cite = (...refs: string[]) =>
 describe('POST /sync with a reply that cites sources', () => {
   const hydrationId = '673e1b2c-3d4e-8009-f4a5-1a2b3c4d5e6f'
   const entity = '\uE200entity\uE202["bakery","Tartine"]\uE201'
+  const product =
+    '\uE200product\uE202{"product_name":"Cane-lined basket"}\uE201'
+  const attribution = 'Tartine bakes at 78%.'
   const [first, second] = [cite('turn0search0'), cite('turn0search1')]
-  const reply = `【重要】Start around 70%\uE203.${first} ${entity} uses 75%.${second}`
+  const reply = `【重要】Start around 70%\uE203.${first} ${entity} uses 75%.${second} ${attribution}${product}`
 
   beforeEach(() => {
     chatgpt.putChat({
@@ -903,6 +906,18 @@ describe('POST /sync with a reply that cites sources', () => {
                 alt: 'Tartine',
               },
               {
+                type: 'product',
+                // ChatGPT may list a no-break hyphen or space where the reply
+                // has a plain one.
+                matched_text: product.replace('-', '\u2011'),
+                alt: null,
+              },
+              {
+                type: 'attribution',
+                matched_text: attribution,
+                alt: attribution,
+              },
+              {
                 type: 'grouped_webpages',
                 matched_text: second,
                 items: [
@@ -938,7 +953,7 @@ describe('POST /sync with a reply that cites sources', () => {
     })
   })
 
-  test('archives the sources after the reply, without its citation markers', async () => {
+  test('archives the sources after the reply, with its markup shown as the UI does', async () => {
     await sync()
 
     expect(await getJson(`/threads/chatgpt/${hydrationId}?items=all`)).toEqual({
@@ -949,8 +964,9 @@ describe('POST /sync with a reply that cites sources', () => {
         }),
         expect.objectContaining({
           id: `${hydrationId}:n-reply:assistant_message`,
-          // 【…】 is real text, and an entity names something the reply shows.
-          text: `【重要】Start around 70%. ${entity} uses 75%.`,
+          // 【…】 is real text. An entity shows as its name, a product card as
+          // nothing.
+          text: '【重要】Start around 70%. Tartine uses 75%. Tartine bakes at 78%.',
         }),
         expect.objectContaining({
           id: `${hydrationId}:n-reply:web_sources`,

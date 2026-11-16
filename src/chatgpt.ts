@@ -276,22 +276,36 @@ const citationSchema = z.discriminatedUnion('type', [
     .transform(({ sources }) => ({ marker: '', sources })),
 ])
 
-/** The other references name what the reply shows, so their text stays. */
-const citationTypes = new Set([
-  'hidden',
-  'grouped_webpages',
-  'webpage',
-  'sources_footnote',
-])
+const citationTypes = new Set<string>(
+  citationSchema.options.map((option) => option.in.shape.type.value),
+)
 
-const citationsSchema = z.object({
+/**
+ * Any other reference but an attribution marks up something the UI renders in
+ * its place, such as an entity's name or a product card, so it shows as its
+ * alt text, or as nothing without one. An attribution marks the reply's own
+ * prose, so it stays.
+ */
+const renderedSchema = z
+  .object({ matched_text: z.string(), alt: z.string().nullish() })
+  .transform(({ matched_text, alt }) => ({
+    marker: matched_text,
+    shown: alt ?? '',
+    sources: [],
+  }))
+
+const referencesSchema = z.object({
   content_references: z
     .array(z.looseObject({ type: z.string() }))
     .default([])
     .transform((references) =>
       references
-        .filter(({ type }) => citationTypes.has(type))
-        .map((reference) => citationSchema.parse(reference)),
+        .filter(({ type }) => type !== 'attribution')
+        .map((reference) =>
+          citationTypes.has(reference.type)
+            ? { ...citationSchema.parse(reference), shown: '' }
+            : renderedSchema.parse(reference),
+        ),
     ),
   // Older replies cite without URLs, so their sources are what they searched.
   search_result_groups: z
@@ -299,17 +313,34 @@ const citationsSchema = z.object({
     .default([]),
 })
 
-/** A reply's text without its citation markers, and the web sources it cites. */
+/**
+ * A marker with plain hyphens and spaces. A reference may list a no-break
+ * hyphen or space where the reply has a plain one.
+ */
+const plainSpaced = (marker: string) =>
+  marker.replaceAll('\u2011', '-').replaceAll(/[\u00a0\u202f]/g, ' ')
+
+/**
+ * A reply's text as the UI shows it, without citation markers, and the web
+ * sources it cites.
+ */
 const citedReply = (text: string, metadata: unknown) => {
   const { content_references, search_result_groups } =
-    citationsSchema.parse(metadata)
+    referencesSchema.parse(metadata)
   const cited = [
     ...content_references.flatMap(({ sources }) => sources),
     ...search_result_groups.flatMap(({ entries }) => entries),
   ]
   return {
     text: content_references.reduce(
-      (stripped, { marker }) => stripped.replaceAll(marker, ''),
+      // An empty marker marks no span; replacing it would insert between
+      // every character.
+      (shownText, { marker, shown }) =>
+        marker === ''
+          ? shownText
+          : shownText
+              .replaceAll(marker, shown)
+              .replaceAll(plainSpaced(marker), shown),
       text,
     ),
     // Each source once, where it's first cited.
