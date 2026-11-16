@@ -172,6 +172,25 @@ const visibleBranch = ({
 
 const textSchema = z.object({ parts: z.array(z.string()) })
 
+/**
+ * An image as a Markdown placeholder holding its bare file ID, so a later
+ * route can resolve it without re-reading the chat. Uploads point at
+ * `file-service://file-…`, generated and pasted images at `sediment://file_…`.
+ */
+const imageSchema = z
+  .object({
+    content_type: z.literal('image_asset_pointer'),
+    asset_pointer: z.string().regex(/^[\w-]+:\/\/./),
+  })
+  .transform(
+    ({ asset_pointer }) =>
+      `![image](chatgpt-file:${asset_pointer.split('://')[1]})`,
+  )
+
+const multimodalSchema = z.object({
+  parts: z.array(z.union([z.string(), imageSchema])),
+})
+
 /** An Item a message becomes, before its Thread numbers it. */
 type ItemDraft = { type: string; payload: object }
 
@@ -192,6 +211,18 @@ const toItemDrafts = (message: Message): ItemDraft[] => {
     const text = textSchema.parse(message.content).parts.join('\n')
     // A turn that only called the web leaves an empty reply.
     return text === '' ? [] : [{ type: `${role}_message`, payload: { text } }]
+  }
+
+  // Images come in a user message, or for a generated image in the image
+  // tool's message, which the UI shows as ChatGPT's reply.
+  if (
+    content_type === 'multimodal_text' &&
+    message.recipient === 'all' &&
+    (role === 'user' || role === 'tool')
+  ) {
+    const text = multimodalSchema.parse(message.content).parts.join('\n')
+    const type = role === 'user' ? 'user_message' : 'assistant_message'
+    return text === '' ? [] : [{ type, payload: { text } }]
   }
 
   // Not shown as a Message: system, memory and context messages, and tool

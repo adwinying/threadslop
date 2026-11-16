@@ -328,6 +328,148 @@ test('POST /sync leaves out hidden, system, memory and context messages', async 
   ])
 })
 
+/** The Thread's Messages, by type and text. */
+const messages = async (threadId: string) =>
+  z
+    .object({
+      items: z.array(z.object({ type: z.string(), text: z.string() })),
+    })
+    .parse(await getJson(`/threads/chatgpt/${threadId}`))
+    .items.map(({ type, text }) => ({ type, text }))
+
+const image = (assetPointer: string) => ({
+  content_type: 'image_asset_pointer',
+  asset_pointer: assetPointer,
+  size_bytes: 23491,
+  width: 448,
+  height: 448,
+  fovea: null,
+  metadata: { dalle: null, sanitized: true },
+})
+
+describe('POST /sync with images', () => {
+  test('keeps uploaded images in the prompt as file-ID placeholders', async () => {
+    chatgpt.putChat({
+      id: '673df605-6172-8008-e394-0f1a2b3c4d5e',
+      title: 'Plant ID',
+      updatedAt: '2026-11-05T10:00:00.000000Z',
+      nodes: [
+        {
+          id: 'n-upload',
+          role: 'user',
+          content: {
+            content_type: 'multimodal_text',
+            parts: [
+              image('file-service://file-Fake0Leaf1Upload2Id3'),
+              image('sediment://file_00000000fake0pot1paste2id3'),
+              'What plant is this?',
+            ],
+          },
+          at: '2026-11-05T10:00:00.000Z',
+        },
+        {
+          id: 'n-reply',
+          role: 'assistant',
+          text: 'A pothos.',
+          at: '2026-11-05T10:00:05.000Z',
+        },
+        {
+          id: 'n-screenshot',
+          role: 'user',
+          content: {
+            content_type: 'multimodal_text',
+            parts: [image('sediment://file_00000000fake0shot1id2')],
+          },
+          at: '2026-11-05T10:01:00.000Z',
+        },
+      ],
+    })
+
+    await sync()
+
+    expect(await messages('673df605-6172-8008-e394-0f1a2b3c4d5e')).toEqual([
+      {
+        type: 'user_message',
+        text:
+          '![image](chatgpt-file:file-Fake0Leaf1Upload2Id3)\n' +
+          '![image](chatgpt-file:file_00000000fake0pot1paste2id3)\n' +
+          'What plant is this?',
+      },
+      { type: 'assistant_message', text: 'A pothos.' },
+      {
+        type: 'user_message',
+        text: '![image](chatgpt-file:file_00000000fake0shot1id2)',
+      },
+    ])
+  })
+
+  test('keeps a generated image as a reply holding its file-ID placeholder', async () => {
+    const imageGen = 't2uay3k.sj1i4kz'
+    chatgpt.putChat({
+      id: '673e0716-7283-8009-f4a5-1a2b3c4d5e6f',
+      title: 'Cat poster',
+      updatedAt: '2026-11-06T10:00:00.000000Z',
+      nodes: [
+        {
+          id: 'n-ask',
+          role: 'user',
+          text: 'Draw a cat in a spacesuit.',
+          at: '2026-11-06T10:00:00.000Z',
+        },
+        {
+          id: 'n-call',
+          role: 'assistant',
+          recipient: imageGen,
+          text: '{"prompt":"A cat in a spacesuit","size":"1024x1536"}',
+          at: '2026-11-06T10:00:01.000Z',
+        },
+        {
+          id: 'n-progress',
+          role: 'tool',
+          name: imageGen,
+          text: 'Processing image',
+          metadata: { is_visually_hidden_from_conversation: true },
+          at: '2026-11-06T10:00:02.000Z',
+        },
+        {
+          id: 'n-image',
+          role: 'tool',
+          name: imageGen,
+          content: {
+            content_type: 'multimodal_text',
+            parts: [image('sediment://file_00000000fake0cat1poster2id3')],
+          },
+          at: '2026-11-06T10:00:30.000Z',
+        },
+        {
+          id: 'n-note',
+          role: 'tool',
+          name: imageGen,
+          recipient: 'assistant',
+          text: 'GPT-4o returned 1 images.',
+          at: '2026-11-06T10:00:31.000Z',
+        },
+        {
+          id: 'n-empty',
+          role: 'assistant',
+          text: '',
+          at: '2026-11-06T10:00:32.000Z',
+        },
+      ],
+    })
+
+    await sync()
+
+    expect(await messages('673e0716-7283-8009-f4a5-1a2b3c4d5e6f')).toEqual([
+      { type: 'user_message', text: 'Draw a cat in a spacesuit.' },
+      {
+        type: 'assistant_message',
+        text: '![image](chatgpt-file:file_00000000fake0cat1poster2id3)',
+      },
+    ])
+  })
+})
+
 const oneTurn = (id: string, prompt: string, at: string) => [
   { id: `${id}-ask`, role: 'user' as const, text: prompt, at },
   { id: `${id}-reply`, role: 'assistant' as const, text: 'Sure.', at },
