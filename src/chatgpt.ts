@@ -187,9 +187,20 @@ const imageSchema = z
       `![image](chatgpt-file:${asset_pointer.split('://')[1]})`,
   )
 
-const multimodalSchema = z.object({
-  parts: z.array(z.union([z.string(), imageSchema])),
-})
+// Dropped like an unknown content type, so a new kind of part, such as audio,
+// doesn't fail every later Sync.
+const unknownPartSchema = z
+  .looseObject({
+    content_type: z.string().refine((type) => type !== 'image_asset_pointer'),
+  })
+  .transform(() => null)
+
+/** A message's text and images, one part per line. */
+const multimodalSchema = z
+  .object({
+    parts: z.array(z.union([z.string(), imageSchema, unknownPartSchema])),
+  })
+  .transform(({ parts }) => parts.filter((part) => part !== null).join('\n'))
 
 /** A tool call or result's text: text parts, or code and its output. */
 const toolTextSchema = z.union([
@@ -355,7 +366,7 @@ const toItemDrafts = (message: Message, results: Message[]): ItemDraft[] => {
     message.recipient === 'all' &&
     (role === 'user' || role === 'tool')
   ) {
-    const text = multimodalSchema.parse(message.content).parts.join('\n')
+    const text = multimodalSchema.parse(message.content)
     const type = role === 'user' ? 'user_message' : 'assistant_message'
     return text === '' ? [] : [{ type, payload: { text } }]
   }

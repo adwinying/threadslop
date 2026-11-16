@@ -468,6 +468,35 @@ describe('POST /sync with images', () => {
       },
     ])
   })
+
+  test('drops a part it does not know and still archives newer chats', async () => {
+    chatgpt.putChat({
+      id: '6736f1e2-0a1b-8002-8d3e-4f5a6b7c8d9e',
+      title: 'Voice note',
+      updatedAt: '2026-10-30T10:00:00.000000Z',
+      nodes: [
+        {
+          id: 'n-voice',
+          role: 'user',
+          content: {
+            content_type: 'multimodal_text',
+            parts: [
+              { content_type: 'audio_asset_pointer', asset_pointer: 'x' },
+              'Transcribe my shopping list.',
+            ],
+          },
+          at: '2026-10-30T10:00:00.000Z',
+        },
+      ],
+    })
+
+    await sync()
+
+    expect(await messages('6736f1e2-0a1b-8002-8d3e-4f5a6b7c8d9e')).toEqual([
+      { type: 'user_message', text: 'Transcribe my shopping list.' },
+    ])
+    expect(await messageTexts(sourdough.id)).toHaveLength(4)
+  })
 })
 
 const search = async (q: string, items?: 'all') => {
