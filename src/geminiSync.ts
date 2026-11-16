@@ -1,30 +1,7 @@
-import type { Archive, ArchivedThread } from '~/archive'
-import type { GeminiCollaborators, ListedChat, Turn } from '~/gemini'
-import { extractSearchText } from '~/extract'
+import type { Archive } from '~/archive'
+import type { GeminiCollaborators, Turn } from '~/gemini'
 import { connectGemini, geminiLabel } from '~/gemini'
-
-const toItem = (
-  threadId: string,
-  turn: Turn,
-  type: string,
-  payload: object,
-) => {
-  const at = turn.at.toISOString()
-  const json = JSON.stringify(payload)
-  return {
-    // Stable across re-reads, so a re-read Thread updates its rows. Item IDs
-    // are unique per Source, and the response ID's position is a guess, so
-    // the Thread ID keeps one Thread's Items from ever replacing another's.
-    id: `${threadId}:${turn.responseId}:${type}`,
-    type,
-    status: 'completed',
-    createdAt: at,
-    completedAt: at,
-    updatedAt: at,
-    payload: json,
-    searchText: extractSearchText(type, json),
-  }
-}
+import { syncWebApp, toArchivedThread } from '~/webSync'
 
 const markdownImage = ({ filename, url }: { filename: string; url: string }) =>
   `![${filename}](${url})`
@@ -52,9 +29,18 @@ const replyText = ({ reply, generated }: Turn) =>
     reply,
   )
 
-const toItems = (threadId: string, turn: Turn) => {
-  const item = (type: string, payload: object) =>
-    toItem(threadId, turn, type, payload)
+/**
+ * A turn's Items, each keyed by the turn's response ID. That ID's position is
+ * a guess, so the Thread ID in each Item ID keeps a wrong guess from replacing
+ * another Thread's Items.
+ */
+const toItemDrafts = (turn: Turn) => {
+  const item = (type: string, payload: object) => ({
+    key: turn.responseId,
+    type,
+    payload,
+    at: turn.at,
+  })
   return [
     item('user_message', { text: promptText(turn) }),
     ...(turn.reasoning === ''
@@ -69,65 +55,35 @@ const toItems = (threadId: string, turn: Turn) => {
   ]
 }
 
-const toArchivedThread = (chat: ListedChat, turns: Turn[]): ArchivedThread => {
-  const items = turns
-    .flatMap((turn) => toItems(chat.threadId, turn))
-    .map((item, ordinal) => ({ ...item, ordinal }))
-  const updatedAt = chat.updatedAt.toISOString()
-  return {
-    id: chat.threadId,
-    title: chat.title,
-    projectTitle: null,
-    workspaceRoot: null,
-    createdAt: turns[0]?.at.toISOString() ?? updatedAt,
-    updatedAt,
-    archivedAt: null,
-    // Stored like a Host's, but never compared: Gemini lists no Item count,
-    // so a Thread counts as changed by its last update alone.
-    signature: { updatedAt, itemCount: items.length, deleted: false },
-    items,
-  }
+type Gemini = Awaited<ReturnType<typeof connectGemini>>
+
+/** The pages of the chats, newest first. */
+async function* listPages(gemini: Gemini) {
+  let pageToken: string | undefined
+  do {
+    const page = await gemini.listChats(pageToken)
+    yield page.chats
+    pageToken = page.nextPageToken
+  } while (pageToken !== undefined)
 }
 
-// Reading more per Sync risks Google throttling or flagging the account. A
-// larger backlog drains over several Syncs.
-const readCap = 30
-
-/**
- * Archives the Threads Gemini lists whose last update changed since they were
- * last read, oldest first and at most `readCap` per Sync. Threads missing from
- * the list are kept.
- */
+/** Archives the Gemini Threads whose last update changed, as `syncWebApp` does. */
 export const syncGemini = async (
   archive: Archive,
   collaborators: GeminiCollaborators,
 ) => {
   const gemini = await connectGemini(collaborators)
-  archive.recordHost(geminiLabel, null)
-  const stored = archive.signatures(geminiLabel)
-  const isChanged = ({ threadId, updatedAt }: ListedChat) =>
-    stored.get(threadId)?.updatedAt !== updatedAt.toISOString()
-
-  // The list runs newest first, so paging stops at the first page without a
-  // changed Thread. Reading oldest first keeps that stop correct mid-backlog:
-  // every changed Thread left unread is newer than every one read.
-  const changed: ListedChat[] = []
-  let pageToken: string | undefined
-  do {
-    const page = await gemini.listChats(pageToken)
-    const pageChanged = page.chats.filter(isChanged)
-    if (pageChanged.length === 0) break
-    changed.push(...pageChanged)
-    pageToken = page.nextPageToken
-  } while (pageToken !== undefined)
-
-  const toRead = changed
-    .toSorted((a, b) => +a.updatedAt - +b.updatedAt)
-    .slice(0, readCap)
-  // Each Thread commits with its Signature, so an interrupted Sync re-reads
-  // only what didn't land.
-  for (const chat of toRead) {
-    const turns = await gemini.readChat(chat.threadId)
-    archive.saveThreads(geminiLabel, [toArchivedThread(chat, turns)])
-  }
+  await syncWebApp({
+    archive,
+    label: geminiLabel,
+    lists: [listPages(gemini)],
+    read: async (listed) => {
+      const turns = await gemini.readChat(listed.threadId)
+      return toArchivedThread(
+        listed,
+        turns[0]?.at ?? listed.updatedAt,
+        turns.flatMap(toItemDrafts),
+      )
+    },
+  })
 }

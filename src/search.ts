@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type { ItemScope } from '~/itemScope'
+import { chatgptChatUrl, chatgptLabel } from '~/chatgpt'
 import { geminiChatUrl, geminiLabel } from '~/gemini'
 import { inScopeSql, roleOf } from '~/itemScope'
 
@@ -28,14 +29,19 @@ const hitJoins = `
   JOIN threads t ON t.host = i.host AND t.thread_id = i.thread_id
   JOIN hosts h ON h.label = i.host`
 
+/** Sources whose Threads open in a web app rather than T3 Code. */
+const webChatUrls = new Map([
+  [geminiLabel, geminiChatUrl],
+  [chatgptLabel, chatgptChatUrl],
+])
+
 const toHit = ({ archived, ...row }: HitRow) => ({
   ...row,
   role: roleOf(row.itemType),
   archived: archived === 1,
   link:
-    row.host === geminiLabel
-      ? geminiChatUrl(row.threadId)
-      : `t3-thread://v2/${row.environmentId}/${row.threadId}`,
+    webChatUrls.get(row.host)?.(row.threadId) ??
+    `t3-thread://v2/${row.environmentId}/${row.threadId}`,
 })
 
 /** Quotes a query as one FTS5 phrase so its operators match literally. */

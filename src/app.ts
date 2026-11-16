@@ -73,7 +73,8 @@ export const createApp = ({
       ? [
           {
             label: chatgptLabel,
-            sync: () => syncChatGPT({ dataDir, fetch, pace: chatgptPace }),
+            sync: () =>
+              syncChatGPT(archive, { dataDir, fetch, pace: chatgptPace }),
           },
         ]
       : []),
