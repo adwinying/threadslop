@@ -352,7 +352,10 @@ export const connectGemini = async ({
         const body = await call(rpcs.listChats, [
           chatsPerPage,
           pageToken ?? null,
-          [0, null, 1],
+          // The web app's filter as of 2026-11. The older `[0, null, 1]` leaves
+          // out some chats with agent tasks, and lists the rest at their last
+          // prompt's time rather than their last reply's.
+          [null, null, 1, null, null, null, null, null, null, 1],
         ])
         return parseOrThrow('Gemini chat list', () => parseListPage(body))
       } catch (error) {
