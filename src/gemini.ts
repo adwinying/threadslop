@@ -243,10 +243,12 @@ const signIn = async (request: Request) => {
   }
   if (response.status >= 300 && response.status < 400) return undefined
   const { origin, pathname } = new URL(url)
-  if (origin + pathname !== appUrl) return undefined
+  const landed = origin + pathname
   if (!response.ok) {
-    throw new Error(`Gemini answered the app page with HTTP ${response.status}`)
+    const name = landed === appUrl ? 'the app page' : landed
+    throw new Error(`Gemini answered ${name} with HTTP ${response.status}`)
   }
+  if (landed !== appUrl) return undefined
   const page = await response.text()
   // The XSRF token batchexecute requires as its `at` form field.
   const accessToken = tokenIn(page, 'SNlM0e')

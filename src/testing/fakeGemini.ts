@@ -220,6 +220,7 @@ export const createFakeGemini = () => {
   let rotations = 0
   let signedIn = true
   let appPageStatus: number | undefined
+  let serviceLoginStatus: number | undefined
   let answersBeforeThrottle = Infinity
   let refusingRotations = false
   // Gemini's own cookie, issued by /accounts/SetOSID.
@@ -311,6 +312,9 @@ export const createFakeGemini = () => {
       origin === 'https://accounts.google.com' &&
       pathname === '/ServiceLogin'
     ) {
+      if (serviceLoginStatus !== undefined) {
+        return respond(null, { status: serviceLoginStatus })
+      }
       if (!authorized) {
         return respond(
           null,
@@ -443,6 +447,10 @@ export const createFakeGemini = () => {
     /** Answers the app page with `status`, as Google does when down or busy. */
     failAppPage: (status: number) => {
       appPageStatus = status
+    },
+    /** Answers ServiceLogin with `status`, on the way to Gemini's OSID. */
+    failServiceLogin: (status: number) => {
+      serviceLoginStatus = status
     },
     /**
      * Answers every rpc after the next `answered` without a result frame, as

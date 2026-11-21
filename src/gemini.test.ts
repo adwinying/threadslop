@@ -637,6 +637,19 @@ describe('POST /sync when Gemini fails', () => {
     )
   })
 
+  test('records a redirect answered with HTTP 503 as that, not as signed out', async () => {
+    gemini.failServiceLogin(503)
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({
+        lastError:
+          'Gemini answered https://accounts.google.com/ServiceLogin with HTTP 503',
+      }),
+    )
+  })
+
   test('records a session Google sends in circles as signed out', async () => {
     gemini.staleTimestamp()
     gemini.refuseRotations()
