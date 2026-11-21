@@ -9,7 +9,23 @@ import { checkGeminiSignIn, saveGeminiSession } from '~/gemini'
 import { hiddenPrompt } from '~/terminal'
 
 // Firefox's: Chromium's device-bound sessions cut its cookies to a few hours.
-const cookieNames = ['__Secure-1PSID', '__Secure-1PSIDTS']
+// All of them: since Google's 2026-11-19 build, `__Secure-1PSID` and
+// `__Secure-1PSIDTS` alone redirect to sign-in.
+const question = 'Cookie header of a gemini.google.com/app request (Firefox): '
+
+/** `a=1; b=2`, with or without a leading `Cookie:`, as name → value. */
+const parseCookieHeader = (header: string) =>
+  Object.fromEntries(
+    header
+      .replace(/^cookie:/i, '')
+      .split(';')
+      .map((pair) => pair.trim())
+      .filter((pair) => pair.includes('='))
+      .map((pair) => {
+        const index = pair.indexOf('=')
+        return [pair.slice(0, index), pair.slice(index + 1)]
+      }),
+  )
 
 type InstallGeminiOptions = Partial<Terminal> & {
   env?: Record<string, string | undefined>
@@ -38,12 +54,17 @@ export const installGemini = async (
     )
     return 1
   }
-  const cookies: Record<string, string> = {}
-  for (const name of cookieNames) {
-    const value = await prompt(`${name} (from Firefox): `)
-    if (value === undefined) return 130
-    cookies[name] = value
+  const header = await prompt(question)
+  if (header === undefined) return 130
+  // Firefox cuts a long header short with `…` unless Raw is on. Sent as is, the
+  // `…` would fail fetch with an error that prints every cookie.
+  if (!/^[\x20-\x7e]*$/.test(header)) {
+    console.error(
+      "threadslop: that header isn't whole; copy it with Raw on in Firefox's Headers panel",
+    )
+    return 1
   }
+  const cookies = parseCookieHeader(header)
 
   // A failure other than signed out, such as Google answering 503, is no fault
   // of the cookies, so it's reported as is.

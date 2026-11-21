@@ -637,6 +637,17 @@ describe('POST /sync when Gemini fails', () => {
     )
   })
 
+  test('records a session Google sends in circles as signed out', async () => {
+    gemini.staleTimestamp()
+    gemini.refuseRotations()
+
+    await sync()
+
+    expect(await geminiRow()).toEqual(
+      expect.objectContaining({ lastError: 'signed out; run install-gemini' }),
+    )
+  })
+
   test.each([503, 429])(
     'records an app page answered with HTTP %p as that, not as signed out',
     async (status) => {
@@ -931,8 +942,9 @@ describe('POST /sync pacing', () => {
 
     await sync()
 
-    // Rotation, the app page, the list and one read.
-    expect(sentAt).toHaveLength(4)
+    // Rotation, the app page, its redirects to an OSID and back, the list and
+    // one read.
+    expect(sentAt).toHaveLength(7)
     const gaps = sentAt.slice(1).map((at, index) => at - (sentAt[index] ?? at))
     // Timers can fire a little early under load; unpaced gaps are near 0.
     for (const gap of gaps) expect(gap).toBeGreaterThanOrEqual(40)
