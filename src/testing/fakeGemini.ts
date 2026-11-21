@@ -41,10 +41,18 @@ export type ChatFixture = {
   broken?: boolean
 }
 
+// Since Google's 2026-11-19 build, the two `PSID` cookies alone don't sign in;
+// `SID` stands in for the rest of a signed-in browser's cookies.
 const cookies = {
   '__Secure-1PSID': 'fake-psid',
   '__Secure-1PSIDTS': 'fake-psidts',
+  SID: 'fake-sid',
 }
+
+/** A signed-in browser's Cookie header for gemini.google.com. */
+export const fakeCookieHeader = Object.entries(cookies)
+  .map(([name, value]) => `${name}=${value}`)
+  .join('; ')
 const accessToken = 'fake-at-token'
 const rotateBody = '[000,"-0000000000000000000"]'
 
@@ -184,6 +192,15 @@ const routineFrames = [
 
 const signedInPage = `<script>window.WIZ_global_data = {"SNlM0e":"${accessToken}","cfb2h":"boq_assistant-bard-web-server_20261110.08_p0","FdrFJe":"-4011571396556183958","TuX5cc":"en"};</script>`
 
+// Google's sign-in page carries an `SNlM0e` too, so it must never pass for the
+// app page.
+const signInPage = `<script>window.WIZ_global_data = {"SNlM0e":"fake-sign-in-at","cfb2h":"boq_identityfrontendauthuiserver_20261119.04_p0"};</script>`
+
+const redirect = (location: string) => ({
+  status: 302,
+  headers: { Location: location },
+})
+
 /** The Thread ID a read asks for. */
 const chatIdOf = (payload: unknown) =>
   readPayloadSchema.parse(payload)[0].slice('c_'.length)
@@ -203,13 +220,20 @@ export const createFakeGemini = () => {
   let rotations = 0
   let signedIn = true
   let appPageStatus: number | undefined
+  let serviceLoginStatus: number | undefined
   let answersBeforeThrottle = Infinity
   let refusingRotations = false
+  // Gemini's own cookie, issued by /accounts/SetOSID.
+  let osids = 0
+  let staleTimestamp = false
 
   const hasSessionCookies = (header: string) =>
     [...accepted].every(([name, value]) =>
       header.split('; ').includes(`${name}=${value}`),
     )
+
+  const hasOsid = (header: string) =>
+    osids > 0 && header.split('; ').includes(`__Secure-OSID=fake-osid-${osids}`)
 
   /** A response that sets the cookies not yet sent, which replace the old. */
   const respond = (body: BodyInit | null, init: ResponseInit = {}) => {
@@ -274,12 +298,58 @@ export const createFakeGemini = () => {
       if (appPageStatus !== undefined) {
         return respond(null, { status: appPageStatus })
       }
-      return authorized
+      return authorized && hasOsid(cookieHeader)
         ? respond(signedInPage)
-        : respond(null, {
-            status: 302,
-            headers: { Location: 'https://accounts.google.com/ServiceLogin' },
-          })
+        : respond(
+            null,
+            redirect(
+              'https://accounts.google.com/ServiceLogin?continue=https://gemini.google.com/app',
+            ),
+          )
+    }
+
+    if (
+      origin === 'https://accounts.google.com' &&
+      pathname === '/ServiceLogin'
+    ) {
+      if (serviceLoginStatus !== undefined) {
+        return respond(null, { status: serviceLoginStatus })
+      }
+      if (!authorized) {
+        return respond(
+          null,
+          redirect('https://accounts.google.com/v3/signin/identifier'),
+        )
+      }
+      // With a stale timestamp, Google sends the session back without an OSID.
+      return respond(
+        null,
+        redirect(
+          staleTimestamp
+            ? 'https://gemini.google.com/app'
+            : 'https://gemini.google.com/accounts/SetOSID?continue=https://gemini.google.com/app',
+        ),
+      )
+    }
+
+    if (
+      origin === 'https://accounts.google.com' &&
+      pathname === '/v3/signin/identifier'
+    ) {
+      return respond(signInPage)
+    }
+
+    if (
+      origin === 'https://gemini.google.com' &&
+      pathname === '/accounts/SetOSID'
+    ) {
+      osids += 1
+      const response = respond(null, redirect('https://gemini.google.com/app'))
+      response.headers.append(
+        'Set-Cookie',
+        `__Secure-OSID=fake-osid-${osids}; Path=/; Secure; HttpOnly; SameSite=none`,
+      )
+      return response
     }
 
     if (
@@ -292,6 +362,7 @@ export const createFakeGemini = () => {
       if (!authorized) return respond(null, { status: 401 })
       if (refusingRotations) return respond(null, { status: 429 })
       rotations += 1
+      staleTimestamp = false
       unsent.push(['__Secure-1PSIDTS', `fake-psidts-rotated-${rotations}`])
       return respond(null)
     }
@@ -301,7 +372,11 @@ export const createFakeGemini = () => {
       pathname === '/_/BardChatUi/data/batchexecute'
     ) {
       const form = new URLSearchParams(await new Response(init.body).text())
-      if (!authorized || form.get('at') !== accessToken) {
+      if (
+        !authorized ||
+        !hasOsid(cookieHeader) ||
+        form.get('at') !== accessToken
+      ) {
         return respond(null, { status: 401 })
       }
       const [[[rpc, payload]]] = requestSchema.parse(
@@ -358,6 +433,13 @@ export const createFakeGemini = () => {
     removeChat: (id: string) => {
       chats.delete(id)
     },
+    /**
+     * Makes `__Secure-1PSIDTS` stale until the next rotation, as it is minutes
+     * after a browser's copy is taken.
+     */
+    staleTimestamp: () => {
+      staleTimestamp = true
+    },
     /** Ends the session, as Google does when it signs the cookies out. */
     signOut: () => {
       signedIn = false
@@ -365,6 +447,10 @@ export const createFakeGemini = () => {
     /** Answers the app page with `status`, as Google does when down or busy. */
     failAppPage: (status: number) => {
       appPageStatus = status
+    },
+    /** Answers ServiceLogin with `status`, on the way to Gemini's OSID. */
+    failServiceLogin: (status: number) => {
+      serviceLoginStatus = status
     },
     /**
      * Answers every rpc after the next `answered` without a result frame, as

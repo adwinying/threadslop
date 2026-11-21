@@ -215,17 +215,40 @@ class UnloadableChatError extends Error {}
 const tokenIn = (page: string, key: string) =>
   page.match(new RegExp(`"${key}":\\s*"(.*?)"`))?.[1]
 
+type Request = ReturnType<typeof createRequest>
+
+// Since Google's 2026-11-19 build, the app page wants a Gemini cookie of its
+// own, `__Secure-OSID`: a session without one is redirected to ServiceLogin,
+// which sends it to /accounts/SetOSID for one, then back to the app page. Two
+// hops of slack, should Google add one.
+const maxRedirects = 5
+
 /**
- * Loads the web app for its session tokens. Resolves with undefined when
- * signed out: Google redirects to sign-in or serves a page without the tokens.
- * Throws on any other failure, which signing in again wouldn't fix.
+ * Loads the web app for its session tokens, following Google's redirects to
+ * its OSID. Resolves with undefined when signed out: the redirects end
+ * anywhere but the app page, such as Google's sign-in page, which carries an
+ * `SNlM0e` of its own, or the page lacks the tokens. Throws on any other
+ * failure, which signing in again wouldn't fix.
  */
-const signIn = async (request: ReturnType<typeof createRequest>) => {
-  const response = await request(appUrl, { headers: pageOrigin })
-  if (response.status >= 300 && response.status < 400) return undefined
-  if (!response.ok) {
-    throw new Error(`Gemini answered the app page with HTTP ${response.status}`)
+const signIn = async (request: Request) => {
+  let url = appUrl
+  let response = await request(url, { headers: pageOrigin })
+  for (let hop = 0; hop < maxRedirects; hop++) {
+    const location = response.headers.get('Location')
+    if (response.status < 300 || response.status >= 400 || !location) break
+    url = new URL(location, url).href
+    // The jar sends every cookie to any host, so it never leaves Google's two.
+    if (!/^https:\/\/(gemini|accounts)\.google\.com\//.test(url)) break
+    response = await request(url)
   }
+  if (response.status >= 300 && response.status < 400) return undefined
+  const { origin, pathname } = new URL(url)
+  const landed = origin + pathname
+  if (!response.ok) {
+    const name = landed === appUrl ? 'the app page' : landed
+    throw new Error(`Gemini answered ${name} with HTTP ${response.status}`)
+  }
+  if (landed !== appUrl) return undefined
   const page = await response.text()
   // The XSRF token batchexecute requires as its `at` form field.
   const accessToken = tokenIn(page, 'SNlM0e')
@@ -236,6 +259,19 @@ const signIn = async (request: ReturnType<typeof createRequest>) => {
     fsid: tokenIn(page, 'FdrFJe'),
     hl: tokenIn(page, 'TuX5cc') ?? 'en',
   }
+}
+
+/** Asks Google for fresh cookies, resolving with whether it gave them. */
+const rotate = async (request: Request) => {
+  const response = await request(rotateUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'https://accounts.google.com',
+    },
+    body: '[000,"-0000000000000000000"]',
+  })
+  return response.ok
 }
 
 /**
@@ -250,7 +286,11 @@ export const checkGeminiSignIn = async ({
   fetch: Fetch
 }) => {
   const jar = new Map(Object.entries(cookies))
-  const signedIn = await signIn(createRequest({ jar, fetch }))
+  const request = createRequest({ jar, fetch })
+  // A browser's `__Secure-1PSIDTS` is stale minutes after it's copied, and
+  // Google then redirects in circles instead of handing out an OSID.
+  await rotate(request)
+  const signedIn = await signIn(request)
   return signedIn && Object.fromEntries(jar)
 }
 
@@ -283,17 +323,9 @@ export const connectGemini = async ({
   const request = createRequest({ jar, fetch, onSetCookies: save, pace })
 
   if (rotatedAt === undefined || +clock() - +rotatedAt >= rotationInterval) {
-    const rotation = await request(rotateUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Origin: 'https://accounts.google.com',
-      },
-      body: '[000,"-0000000000000000000"]',
-    })
     // A refusal isn't fatal: Google answers 429 to rotations minutes apart,
     // and the sign-in check below judges whether the session still works.
-    if (rotation.ok) {
+    if (await rotate(request)) {
       rotatedAt = clock()
       save()
     }

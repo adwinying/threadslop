@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { installGemini } from '~/installGemini'
-import { createFakeGemini } from '~/testing/fakeGemini'
+import { createFakeGemini, fakeCookieHeader } from '~/testing/fakeGemini'
 import { createTestApp } from '~/testing/fakeHost'
 import { createTerminal } from '~/testing/fakeTerminal'
 
@@ -61,7 +61,7 @@ describe('threadslop install-gemini', () => {
       ],
     })
 
-    expect(await install(['fake-psid\r', 'fake-psidts\r']).exitCode).toBe(0)
+    expect(await install([`${fakeCookieHeader}\r`]).exitCode).toBe(0)
     expect(sessionMode()).toBe(0o600)
 
     await testApp.sync()
@@ -69,14 +69,37 @@ describe('threadslop install-gemini', () => {
     expect(response.status).toBe(200)
   })
 
+  test('rotates cookies copied minutes ago before checking them', async () => {
+    const { gemini, install } = setup()
+    gemini.staleTimestamp()
+
+    expect(await install([`${fakeCookieHeader}\r`]).exitCode).toBe(0)
+  })
+
+  test('accepts the header copied with its name', async () => {
+    const { install } = setup()
+
+    expect(await install([`Cookie: ${fakeCookieHeader}\r`]).exitCode).toBe(0)
+  })
+
+  test('refuses a header Firefox cut short', async () => {
+    const { install } = setup()
+
+    const header = fakeCookieHeader.replace('psidts', '…')
+    expect(await install([`${header}\r`]).exitCode).toBe(1)
+    expect(error).toHaveBeenCalledWith(
+      "threadslop: that header isn't whole; copy it with Raw on in Firefox's Headers panel",
+    )
+  })
+
   test("doesn't echo the cookies", async () => {
     const { install } = setup()
 
-    const { terminal, exitCode } = install(['fake-psid\r', 'fake-psidts\r'])
+    const { terminal, exitCode } = install([`${fakeCookieHeader}\r`])
     await exitCode
 
     expect(terminal.screen()).toBe(
-      '__Secure-1PSID (from Firefox): \n__Secure-1PSIDTS (from Firefox): \n',
+      'Cookie header of a gemini.google.com/app request (Firefox): \n',
     )
   })
 
@@ -85,7 +108,11 @@ describe('threadslop install-gemini', () => {
     gemini.storeSession(testApp.root, { rotatedAt: new Date('2026-11-01') })
     const stored = session()
 
-    expect(await install(['stale-psid\r', 'stale-psidts\r']).exitCode).toBe(1)
+    expect(
+      await install([
+        '__Secure-1PSID=stale-psid; __Secure-1PSIDTS=stale-psidts\r',
+      ]).exitCode,
+    ).toBe(1)
     expect(error).toHaveBeenCalledWith(
       "threadslop: those cookies don't sign in to Gemini",
     )
@@ -98,7 +125,7 @@ describe('threadslop install-gemini', () => {
     const stored = session()
     gemini.failAppPage(503)
 
-    expect(await install(['fake-psid\r', 'fake-psidts\r']).exitCode).toBe(1)
+    expect(await install([`${fakeCookieHeader}\r`]).exitCode).toBe(1)
     expect(error).toHaveBeenCalledWith(
       'threadslop: Gemini answered the app page with HTTP 503',
     )
@@ -110,7 +137,7 @@ describe('threadslop install-gemini', () => {
     gemini.storeSession(testApp.root)
     const stored = session()
 
-    const { terminal, exitCode } = install(['fake-psid\r', 'fake-psidts\r'], {
+    const { terminal, exitCode } = install([`${fakeCookieHeader}\r`], {
       isTTY: false,
     })
 
